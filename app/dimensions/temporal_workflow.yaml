@@ -1,0 +1,104 @@
+# Dimension: TemporalWorkflow
+# Nós :TemporalWorkflow representam os workflows orquestrados pelo Temporal.io
+# no ecossistema Rolê Organizado. Ingeridos a partir de um manifesto YAML
+# declarativo (temporal-workflows.yaml) mantido no repositório do serviço dono.
+
+dimension: temporal_workflow
+node_label: TemporalWorkflow
+parser: temporal_workflow_yaml
+
+# Padrão de arquivo fonte esperado (dentro do repo do serviço dono).
+# O ingestor buscará esse arquivo via GitHub API ou volume local.
+source_patterns:
+  - "temporal-workflows.yaml"
+  - "docs/temporal/temporal-workflows.yaml"
+
+# Campos extraídos pelo temporal_workflow_yaml_parser
+fields:
+  - name: id
+    type: string
+    description: "Identificador único — ex: workflow-finance-reconciliation"
+    required: true
+
+  - name: name
+    type: string
+    description: "Nome da classe Java do workflow — ex: FinanceReconciliationWorkflow"
+    required: true
+
+  - name: category
+    type: string
+    description: "Categoria de execução: scheduled | event-triggered | sandbox"
+    required: true
+    allowed_values: [scheduled, event-triggered, sandbox]
+
+  - name: schedule
+    type: string
+    description: "Expressão cron ou descrição de agendamento (apenas para scheduled)"
+    required: false
+
+  - name: status
+    type: string
+    description: "Estado operacional: active | deprecated"
+    required: true
+    allowed_values: [active, deprecated]
+    default: active
+
+  - name: mode_resolver
+    type: string
+    description: "Nome da classe ModeResolver associada (DISABLED/SHADOW/PRIMARY)"
+    required: false
+
+  - name: replaces
+    type: string
+    description: "Nome do job legado @Scheduled que este workflow substitui"
+    required: false
+
+  - name: service_id
+    type: string
+    description: "ID do serviço dono — ex: service-backend"
+    required: true
+    derivation: "Campo service_id na raiz do manifesto YAML"
+
+  - name: spec_ids
+    type: list[string]
+    description: "IDs de specs implementadas por este workflow (ex: [spec-063])"
+    required: false
+
+# Relacionamentos produzidos por esta dimensão
+relationships:
+  - type: BELONGS_TO
+    direction: outbound
+    target_label: Service
+    description: "Workflow pertence ao serviço que o executa"
+    built_by: ingest_pipeline # criado durante ingest
+
+  - type: IMPLEMENTS
+    direction: outbound
+    target_label: Spec
+    description: "Workflow implementa uma spec (via spec_ids declarados no manifesto)"
+    built_by: ingest_pipeline # criado para cada spec_id declarado
+
+  - type: HAS_WORKFLOW
+    direction: inbound
+    source_label: Service
+    description: "Serviço possui este workflow (reverso de BELONGS_TO)"
+    built_by: ingest_pipeline # criado como bidirecional de BELONGS_TO
+
+# Índices criados no Neo4j para esta dimensão
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT temporal_workflow_id IF NOT EXISTS FOR (w:TemporalWorkflow) REQUIRE w.id IS UNIQUE"
+
+  - type: index
+    property: category
+    cypher: "CREATE INDEX temporal_workflow_category IF NOT EXISTS FOR (w:TemporalWorkflow) ON (w.category)"
+
+  - type: index
+    property: status
+    cypher: "CREATE INDEX temporal_workflow_status IF NOT EXISTS FOR (w:TemporalWorkflow) ON (w.status)"
+
+  - type: fulltext
+    name: temporal_workflow_fts
+    properties: [name, mode_resolver, replaces]
+    cypher: "CREATE FULLTEXT INDEX temporal_workflow_fts IF NOT EXISTS FOR (w:TemporalWorkflow) ON EACH [w.name, w.mode_resolver, w.replaces]"
