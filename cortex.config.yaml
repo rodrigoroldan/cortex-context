@@ -15,6 +15,7 @@ github_default_branch: "main"
 active_dimensions:
   - spec
   - service
+  - temporal_workflow
 
 # Diretório onde as dimension specs (.yaml) estão localizadas
 # Relativo à raiz do repo cortex-role-organizado
@@ -101,3 +102,10 @@ repos_mount_path: "/repos"
 # github: busca diretamente da API do GitHub (recomendado para produção)
 # local: lê do volume /repos montado no container (requer cópia manual)
 ingest_strategy: "github"
+
+# Manifesto dos Temporal Workflows (usado por POST /api/v1/ingest/workflows)
+# O parser busca temporal-workflows.yaml no repo/branch/path configurados
+temporal_workflow_manifest:
+  repo: backend-role-organizado
+  branch: feature/146-temporal-workflow-dimension
+  path: temporal-workflows.yaml

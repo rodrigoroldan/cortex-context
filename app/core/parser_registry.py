@@ -11,11 +11,13 @@ from __future__ import annotations
 from app.core.parsers.agents_md_parser import AgentsMdParser
 from app.core.parsers.base import DimensionParser
 from app.core.parsers.spec_parser import SpecParser
+from app.core.parsers.temporal_workflow_yaml_parser import TemporalWorkflowYamlParser
 
 # Registro global: chave_yaml → instância do parser
 REGISTRY: dict[str, DimensionParser] = {
     "spec_md": SpecParser(),
     "agents_md": AgentsMdParser(),
+    "temporal_workflow_yaml": TemporalWorkflowYamlParser(),
 }
 
 
