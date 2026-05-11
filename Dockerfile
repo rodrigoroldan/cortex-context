@@ -24,6 +24,7 @@ COPY --from=builder /install /usr/local
 # Copia código
 COPY app/ app/
 COPY run.py .
+COPY cortex.config.yaml .
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
