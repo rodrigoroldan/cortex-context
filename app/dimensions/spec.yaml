@@ -1,0 +1,75 @@
+# Dimension: Spec
+# Formaliza a dimensão existente de nós :Spec no grafo Cortex.
+# Fonte: specs/**/plan.md em role-organizado-workspace
+
+dimension: spec
+node_label: Spec
+parser: spec_md
+
+# Padrão glob para localizar arquivos fonte (relativo à raiz do repo workspace)
+source_pattern: "specs/**/plan.md"
+
+# Campos extraídos por spec_parser (documentados aqui como referência)
+fields:
+  - name: id
+    type: string
+    description: "Identificador único — ex: spec-070"
+    required: true
+  - name: number
+    type: integer
+    description: "Número sequencial da spec"
+    required: true
+  - name: title
+    type: string
+    description: "Título extraído do H1 do plan.md"
+  - name: status
+    type: string
+    description: "completed | in-progress | planned | todo"
+  - name: labels
+    type: list[string]
+    description: "Labels inferidos do slug + conteúdo"
+  - name: summary
+    type: string
+    description: "Primeira frase significativa do plan.md"
+  - name: repos
+    type: list[string]
+    description: "Repos mencionados no texto"
+  - name: file_path
+    type: string
+    description: "Caminho relativo ao arquivo fonte"
+  - name: labels_str
+    type: string
+    description: "Labels concatenados — usado no índice FTS"
+
+# Tipos de relacionamentos produzidos por este parser
+relationships:
+  - type: SUPERSEDES
+    direction: outbound
+    description: "Esta spec substitui outra"
+  - type: EVOLVES_FROM
+    direction: outbound
+    description: "Esta spec é evolução de outra"
+  - type: DEPENDS_ON
+    direction: outbound
+    description: "Esta spec depende de outra"
+  - type: RELATED_TO
+    direction: outbound
+    description: "Referência cruzada genérica"
+  - type: IMPLEMENTS
+    direction: outbound
+    description: "Esta spec implementa outra"
+  - type: AFFECTS
+    direction: outbound
+    target_label: Service
+    description: "Esta spec afeta um serviço (via Spec.repos[])"
+    built_by: relationship_builder  # gerado em pós-processamento
+
+# Índices criados no Neo4j para esta dimensão
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT spec_id IF NOT EXISTS FOR (s:Spec) REQUIRE s.id IS UNIQUE"
+  - type: fulltext
+    name: spec_fts
+    properties: [title, summary, labels_str]
+    cypher: "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS FOR (s:Spec) ON EACH [s.title, s.summary, s.labels_str]"

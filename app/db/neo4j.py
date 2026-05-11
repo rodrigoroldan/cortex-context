@@ -34,8 +34,18 @@ async def _ensure_constraints() -> None:
             "CREATE CONSTRAINT spec_id IF NOT EXISTS "
             "FOR (s:Spec) REQUIRE s.id IS UNIQUE"
         )
-        # Índice de texto completo para busca por keywords
+        # Índice de texto completo para busca por keywords (Spec)
         await session.run(
             "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS "
             "FOR (s:Spec) ON EACH [s.title, s.summary, s.labels_str]"
+        )
+        # Unique constraint no id do nó Service
+        await session.run(
+            "CREATE CONSTRAINT service_id IF NOT EXISTS "
+            "FOR (s:Service) REQUIRE s.id IS UNIQUE"
+        )
+        # Índice de texto completo para Service (name + capabilities)
+        await session.run(
+            "CREATE FULLTEXT INDEX service_fts IF NOT EXISTS "
+            "FOR (s:Service) ON EACH [s.name, s.capabilities_str]"
         )
