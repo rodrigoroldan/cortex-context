@@ -135,8 +135,7 @@ async def query_context(
             ORDER BY score DESC
             LIMIT $limit
             """,
-            query=fts_query,
-            limit=limit,
+            {"query": fts_query, "limit": limit},
         )
         seed_records = await seed_result.data()
         seed_ids = [r["props"]["id"] for r in seed_records]
