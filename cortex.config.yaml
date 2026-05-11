@@ -1,0 +1,76 @@
+# cortex.config.yaml
+# Product profile do Rolê Organizado para o Cortex Knowledge Graph.
+# Define quais dimensões estão ativas e quais repos são monitorados.
+
+cortex_url: "https://cortex.rolds.dev"
+cortex_version: "2.0.0"
+
+# Dimensões ativas neste produto
+# Cada entrada deve ter um arquivo correspondente em app/dimensions/{dimension}.yaml
+active_dimensions:
+  - spec
+  - service
+
+# Diretório onde as dimension specs (.yaml) estão localizadas
+# Relativo à raiz do repo cortex-role-organizado
+dimensions_dir: "app/dimensions"
+
+# Diretório raiz das specs (usado pelo parser spec_md)
+# No container Docker, montado via volume
+specs_dir: "/specs"
+
+# Repos do ecossistema monitorados para ingestão de Service nodes
+# O ingestor procura por AGENTS.md / agents.md em cada um desses repos.
+# No container, os repos são acessíveis via bind mount em /repos/{repo_name}
+repo_sources:
+  - name: backend-role-organizado
+    service_id: service-backend
+    agents_path: "AGENTS.md"
+  - name: bff-role-organizado
+    service_id: service-bff
+    agents_path: "agents.md"
+  - name: webview-role-organizado
+    service_id: service-webview
+    agents_path: "agents.md"
+  - name: frontend-admin-role-organizado
+    service_id: service-admin
+    agents_path: "agents.md"
+  - name: app-android-role-organizado
+    service_id: service-android
+    agents_path: "agents.md"
+  - name: app-ios-role-organizado
+    service_id: service-ios
+    agents_path: "agents.md"
+  - name: lambda-notifications-role-organizado
+    service_id: service-lambda
+    agents_path: "AGENTS.md"
+  - name: landing-role-organizado
+    service_id: service-landing
+    agents_path: "agents.md"
+  - name: cortex-role-organizado
+    service_id: service-cortex
+    agents_path: "README.md"  # Cortex usa README como fonte de contexto
+  - name: orchestrator-openclaw-role-organizado
+    service_id: service-openclaw
+    agents_path: "README.md"
+  - name: qa-taac-role-organizado
+    service_id: service-qa-taac
+    agents_path: "README.md"
+  - name: iac-proxmox-role-organizado
+    service_id: service-iac-proxmox
+    agents_path: "README.md"
+  - name: iac-aws-role-organizado
+    service_id: service-iac-aws
+    agents_path: "README.md"
+  - name: iac-cloudflare-role-organizado
+    service_id: service-iac-cloudflare
+    agents_path: "README.md"
+  - name: iac-gcp-role-organizado
+    service_id: service-iac-gcp
+    agents_path: "README.md"
+  - name: rods-role-organizado
+    service_id: service-rods
+    agents_path: "README.md"
+
+# Caminho raiz onde os repos estão montados (no container Docker)
+repos_mount_path: "/repos"

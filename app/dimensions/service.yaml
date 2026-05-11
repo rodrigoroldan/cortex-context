@@ -1,0 +1,65 @@
+# Dimension: Service
+# Nós :Service representam os serviços/repos do ecossistema Rolê Organizado.
+# Extraídos automaticamente dos arquivos AGENTS.md / agents.md de cada repo.
+
+dimension: service
+node_label: Service
+parser: agents_md
+
+# Padrão glob para localizar arquivos fonte.
+# O ingestor percorre os repos listados em cortex.config.yaml e procura por esses padrões.
+source_patterns:
+  - "**/AGENTS.md"
+  - "**/agents.md"
+
+# Campos extraídos por agents_md_parser
+fields:
+  - name: id
+    type: string
+    description: "Identificador único — ex: service-backend, service-bff"
+    required: true
+    derivation: "repo nome sem sufixo -role-organizado, prefixado com 'service-'"
+  - name: name
+    type: string
+    description: "Nome legível do serviço — extraído do H1 do agents.md"
+    required: true
+  - name: repo
+    type: string
+    description: "Nome completo do repositório — ex: backend-role-organizado"
+    required: true
+  - name: tech
+    type: list[string]
+    description: "Stack tecnológica — extraída da tabela 'Stack' no agents.md"
+  - name: capabilities
+    type: list[string]
+    description: "Capacidades do serviço — extraídas de seção '## Capabilities' ou similar"
+  - name: port
+    type: integer
+    description: "Porta principal do serviço (se mencionada no agents.md)"
+    required: false
+  - name: url
+    type: string
+    description: "URL pública do serviço (ex: bff.rolds.dev) — detectada por grep de domínio rolds.dev"
+    required: false
+  - name: version
+    type: string
+    description: "Versão do agents.md — linha 'Version: X.Y.Z'"
+    required: false
+
+# Relacionamentos produzidos por esta dimensão
+relationships:
+  - type: AFFECTS
+    direction: inbound
+    source_label: Spec
+    description: "Specs que afetam este serviço (via Spec.repos[] ∩ Service.repo)"
+    built_by: relationship_builder  # gerado em pós-processamento
+
+# Índices criados no Neo4j para esta dimensão
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT service_id IF NOT EXISTS FOR (s:Service) REQUIRE s.id IS UNIQUE"
+  - type: fulltext
+    name: service_fts
+    properties: [name, capabilities_str]
+    cypher: "CREATE FULLTEXT INDEX service_fts IF NOT EXISTS FOR (s:Service) ON EACH [s.name, s.capabilities_str]"

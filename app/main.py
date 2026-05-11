@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db.neo4j import close_driver, init_driver
-from app.routes import health, query
+from app.routes import health, query, services
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(query.router, prefix="/api/v1")
+    app.include_router(services.router, prefix="/api/v1")
 
     return app
 

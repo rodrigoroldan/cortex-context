@@ -61,10 +61,17 @@ class EdgeSummary(BaseModel):
     relationship: str
 
 
+class ServiceRef(BaseModel):
+    id: str
+    name: str
+    repo: str
+
+
 class SubgraphResponse(BaseModel):
     nodes: list[SpecSummary]
     edges: list[EdgeSummary]
     token_estimate: int
+    affected_services: list[ServiceRef] = []
 
 
 class IngestRequest(BaseModel):
@@ -183,10 +190,31 @@ async def query_context(
                         )
                     )
 
+    # Busca serviços afetados pelos seed nodes
+    affected_services: list[ServiceRef] = []
+    if seed_ids:
+        async with driver.session() as session:
+            svc_result = await session.run(
+                """
+                MATCH (s:Spec)-[:AFFECTS]->(svc:Service)
+                WHERE s.id IN $seed_ids
+                RETURN DISTINCT svc.id AS id, svc.name AS name, svc.repo AS repo
+                ORDER BY svc.name
+                """,
+                seed_ids=seed_ids,
+            )
+            svc_records = await svc_result.data()
+            affected_services = [
+                ServiceRef(id=r["id"], name=r["name"] or "", repo=r["repo"] or "")
+                for r in svc_records
+                if r.get("id")
+            ]
+
     return SubgraphResponse(
         nodes=nodes,
         edges=edges,
         token_estimate=_estimate_tokens(nodes),
+        affected_services=affected_services,
     )
 
 

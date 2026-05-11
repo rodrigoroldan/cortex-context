@@ -16,13 +16,13 @@ Usado pelo MCP Server local para fornecer contexto rico ao GitHub Copilot sobre 
 
 ## Endpoints
 
-| Endpoint | Descrição |
-|----------|-----------|
-| `GET /health` | Health check |
-| `GET /api/v1/features` | Lista features ingeridas |
-| `POST /api/v1/ingest` | Ingere specs do diretório configurado |
-| `POST /api/v1/query` | Consulta contextual no grafo |
-| `GET /api/v1/spec/{spec_id}` | Detalhe de uma spec específica |
+| Endpoint                     | Descrição                             |
+| ---------------------------- | ------------------------------------- |
+| `GET /health`                | Health check                          |
+| `GET /api/v1/features`       | Lista features ingeridas              |
+| `POST /api/v1/ingest`        | Ingere specs do diretório configurado |
+| `POST /api/v1/query`         | Consulta contextual no grafo          |
+| `GET /api/v1/spec/{spec_id}` | Detalhe de uma spec específica        |
 
 ## Desenvolvimento
 
@@ -47,10 +47,10 @@ docker compose --env-file .env up -d
 
 ## Configuração
 
-| Variável | Descrição | Default |
-|----------|-----------|---------|
-| `NEO4J_URI` | URI do Neo4j | `bolt://localhost:7687` |
-| `NEO4J_USER` | Usuário Neo4j | `neo4j` |
-| `NEO4J_PASSWORD` | Senha Neo4j | `cortex-secret` |
-| `CORTEX_API_TOKEN` | Token de autenticação da API | `dev-token` |
-| `SPECS_DIR` | Diretório com specs para ingestão | `./specs-sample` |
+| Variável           | Descrição                         | Default                 |
+| ------------------ | --------------------------------- | ----------------------- |
+| `NEO4J_URI`        | URI do Neo4j                      | `bolt://localhost:7687` |
+| `NEO4J_USER`       | Usuário Neo4j                     | `neo4j`                 |
+| `NEO4J_PASSWORD`   | Senha Neo4j                       | `cortex-secret`         |
+| `CORTEX_API_TOKEN` | Token de autenticação da API      | `dev-token`             |
+| `SPECS_DIR`        | Diretório com specs para ingestão | `./specs-sample`        |
