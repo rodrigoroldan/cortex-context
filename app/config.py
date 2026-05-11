@@ -24,6 +24,9 @@ class Settings(BaseSettings):
 
     # Ingestor
     specs_dir: str = "/specs"
+    # Token GitHub para fetch de AGENTS.md em repos privados
+    # Se não configurado, usa fetch anônimo (só funciona em repos públicos)
+    github_token: str = ""
 
     # App
     app_env: str = "development"

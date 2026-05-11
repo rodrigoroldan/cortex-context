@@ -37,6 +37,7 @@ services:
       SPECS_DIR: /specs
       APP_ENV: production
       LOG_LEVEL: INFO
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       - ${SPECS_DIR:-./specs-sample}:/specs:ro
       - ${REPOS_DIR:-./repos-sample}:/repos:ro

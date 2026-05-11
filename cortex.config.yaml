@@ -5,6 +5,11 @@
 cortex_url: "https://cortex.rolds.dev"
 cortex_version: "2.0.0"
 
+# GitHub — owner e branch padrão dos repos monitorados
+# Usado pelo endpoint POST /api/v1/ingest/agents para buscar AGENTS.md diretamente da API
+github_owner: "rodrigoroldan"
+github_default_branch: "main"
+
 # Dimensões ativas neste produto
 # Cada entrada deve ter um arquivo correspondente em app/dimensions/{dimension}.yaml
 active_dimensions:
@@ -26,51 +31,73 @@ repo_sources:
   - name: backend-role-organizado
     service_id: service-backend
     agents_path: "AGENTS.md"
+    branch: "develop"
   - name: bff-role-organizado
     service_id: service-bff
     agents_path: "agents.md"
+    branch: "develop"
   - name: webview-role-organizado
     service_id: service-webview
     agents_path: "agents.md"
+    branch: "develop"
   - name: frontend-admin-role-organizado
-    service_id: service-admin
+    service_id: service-frontend-admin
     agents_path: "agents.md"
+    branch: "develop"
   - name: app-android-role-organizado
-    service_id: service-android
+    service_id: service-app-android
     agents_path: "agents.md"
+    branch: "develop"
   - name: app-ios-role-organizado
-    service_id: service-ios
+    service_id: service-app-ios
     agents_path: "agents.md"
+    branch: "develop"
   - name: lambda-notifications-role-organizado
-    service_id: service-lambda
+    service_id: service-lambda-notifications
     agents_path: "AGENTS.md"
+    branch: "develop"
   - name: landing-role-organizado
     service_id: service-landing
     agents_path: "agents.md"
+    branch: "main"
   - name: cortex-role-organizado
     service_id: service-cortex
-    agents_path: "README.md"  # Cortex usa README como fonte de contexto
+    agents_path: "README.md"
+    branch: "main"
   - name: orchestrator-openclaw-role-organizado
     service_id: service-openclaw
     agents_path: "README.md"
+    branch: "main"
   - name: qa-taac-role-organizado
     service_id: service-qa-taac
     agents_path: "README.md"
+    branch: "develop"
   - name: iac-proxmox-role-organizado
     service_id: service-iac-proxmox
     agents_path: "README.md"
+    branch: "main"
   - name: iac-aws-role-organizado
     service_id: service-iac-aws
     agents_path: "README.md"
+    branch: "main"
   - name: iac-cloudflare-role-organizado
     service_id: service-iac-cloudflare
     agents_path: "README.md"
+    branch: "main"
   - name: iac-gcp-role-organizado
     service_id: service-iac-gcp
     agents_path: "README.md"
+    branch: "main"
   - name: rods-role-organizado
     service_id: service-rods
     agents_path: "README.md"
+    branch: "main"
 
 # Caminho raiz onde os repos estão montados (no container Docker)
+# Usado como fallback local quando github_fetch não está disponível
 repos_mount_path: "/repos"
+
+# Estratégia de ingestão de AGENTS.md
+# github: busca diretamente da API do GitHub (recomendado para produção)
+# local: lê do volume /repos montado no container (requer cópia manual)
+ingest_strategy: "github"
