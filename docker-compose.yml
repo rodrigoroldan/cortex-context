@@ -1,13 +1,16 @@
 version: "3.8"
 
+# Nota: network_mode: host necessário para Docker em LXC unprivileged (Proxmox).
+# Bridge networking requer sysctl net.ipv4.ip_unprivileged_port_start que não está
+# disponível em LXC unprivileged. Com host networking, serviços se comunicam via
+# localhost e são acessíveis diretamente no IP do LXC.
+
 services:
   neo4j:
     image: neo4j:5.18-community
     container_name: cortex-neo4j
     restart: unless-stopped
-    ports:
-      - "7474:7474" # Neo4j Browser UI
-      - "7687:7687" # Bolt protocol
+    network_mode: host
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-cortex-secret}
       NEO4J_PLUGINS: '["apoc"]'
@@ -16,7 +19,7 @@ services:
       - neo4j-data:/data
       - neo4j-logs:/logs
     healthcheck:
-      test: ["CMD", "neo4j", "status"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:7474 || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -25,10 +28,9 @@ services:
     build: .
     container_name: cortex-api
     restart: unless-stopped
-    ports:
-      - "8082:8082"
+    network_mode: host
     environment:
-      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_URI: bolt://localhost:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-cortex-secret}
       CORTEX_API_TOKEN: ${CORTEX_API_TOKEN:-dev-token}
