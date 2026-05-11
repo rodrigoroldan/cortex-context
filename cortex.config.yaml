@@ -107,5 +107,5 @@ ingest_strategy: "github"
 # O parser busca temporal-workflows.yaml no repo/branch/path configurados
 temporal_workflow_manifest:
   repo: backend-role-organizado
-  branch: feature/146-temporal-workflow-dimension
+  branch: develop
   path: temporal-workflows.yaml
