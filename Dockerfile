@@ -7,6 +7,7 @@ WORKDIR /build
 RUN pip install --no-cache-dir hatchling
 
 COPY pyproject.toml .
+COPY README.md .
 COPY app/ app/
 
 # Instala dependências em /install
