@@ -13,14 +13,15 @@ Usado pelo MCP Server local para fornecer contexto rico ao GitHub Copilot sobre 
 
 A v3 introduz 4 pilares universais que estruturam todos os nós do grafo:
 
-| Pilar | Responde a | Exemplos |
-|-------|-----------|---------|
-| `Intent` | O "Por quê" | Specs, Requisitos, Épicos, User Stories |
-| `System` | O "Como" (alto nível) | Serviços, ADRs, APIs, Bancos de dados |
-| `Implementation` | O "O quê" (concreto) | Workflows, Módulos, Componentes |
-| `Runtime` | O "Mundo real" | Alertas, Deployments, Incidentes |
+| Pilar            | Responde a            | Exemplos                                |
+| ---------------- | --------------------- | --------------------------------------- |
+| `Intent`         | O "Por quê"           | Specs, Requisitos, Épicos, User Stories |
+| `System`         | O "Como" (alto nível) | Serviços, ADRs, APIs, Bancos de dados   |
+| `Implementation` | O "O quê" (concreto)  | Workflows, Módulos, Componentes         |
+| `Runtime`        | O "Mundo real"        | Alertas, Deployments, Incidentes        |
 
 Cada nó recebe **multi-labels** no Neo4j:
+
 ```
 (:Spec:Intent)          ← spec-070 "Pagamentos"
 (:Service:System)       ← service-backend
@@ -45,28 +46,29 @@ Cada nó recebe **multi-labels** no Neo4j:
 
 ### Ingestão
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
+| Método | Endpoint                   | Descrição                                                      |
+| ------ | -------------------------- | -------------------------------------------------------------- |
 | `POST` | `/api/v1/ingest/{dim_key}` | Ingesta uma dimensão específica (ex: `spec`, `service`, `adr`) |
-| `POST` | `/api/v1/ingest` | Ingesta todas as dimensões ativas em `cortex.config.yaml` |
+| `POST` | `/api/v1/ingest`           | Ingesta todas as dimensões ativas em `cortex.config.yaml`      |
 
 ### Consulta FTS (Full-Text Search)
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| `GET` | `/api/v1/query` | Busca FTS cross-dimension com expansão 1-hop no grafo |
+| Método | Endpoint        | Descrição                                             |
+| ------ | --------------- | ----------------------------------------------------- |
+| `GET`  | `/api/v1/query` | Busca FTS cross-dimension com expansão 1-hop no grafo |
 
 **Parâmetros de query**: `keywords` (obrigatório), `limit` (default 8), `hops` (default 1), `pillar` (filtro: `Intent\|System\|Implementation\|Runtime`), `dimension` (filtro: `spec\|service\|...`)
 
 ### Consulta Semântica (Vector RAG)
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
+| Método | Endpoint                 | Descrição                                            |
+| ------ | ------------------------ | ---------------------------------------------------- |
 | `POST` | `/api/v1/query/semantic` | Hybrid GraphRAG: embedding → ANN → expansão no grafo |
 
 **Requer** `CORTEX_EMBEDDING_PROVIDER != none`. Retorna `503` quando embedder desabilitado.
 
 **Body**:
+
 ```json
 {
   "query": "como funciona o rateio de eventos?",
@@ -78,30 +80,31 @@ Cada nó recebe **multi-labels** no Neo4j:
 
 ### Nós (Dimension-Agnostic)
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| `GET` | `/api/v1/nodes` | Lista todas as dimensões ativas com contagem de nós |
-| `GET` | `/api/v1/nodes/{dim_key}` | Lista nós de uma dimensão específica |
-| `GET` | `/api/v1/nodes/{dim_key}/{node_id}` | Detalhe de um nó + vizinhos 1-hop |
+| Método | Endpoint                            | Descrição                                           |
+| ------ | ----------------------------------- | --------------------------------------------------- |
+| `GET`  | `/api/v1/nodes`                     | Lista todas as dimensões ativas com contagem de nós |
+| `GET`  | `/api/v1/nodes/{dim_key}`           | Lista nós de uma dimensão específica                |
+| `GET`  | `/api/v1/nodes/{dim_key}/{node_id}` | Detalhe de um nó + vizinhos 1-hop                   |
 
 ### Health
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| `GET` | `/health` | Health check (Neo4j + embedder status) |
+| Método | Endpoint  | Descrição                              |
+| ------ | --------- | -------------------------------------- |
+| `GET`  | `/health` | Health check (Neo4j + embedder status) |
 
 ---
 
 ## Dimensões Ativas
 
-| Dimensão | Pilar | Parser | Fonte |
-|----------|-------|--------|-------|
-| `spec` | Intent | `builtin.markdown_frontmatter` | `specs/**/plan.md` (filesystem) |
-| `service` | System | `builtin.agents_manifest` | `AGENTS.md` / `agents.md` (github_api ou filesystem) |
-| `workflow` | Implementation | `builtin.markdown_frontmatter` | `**/temporal/**/*.yaml`, `**/workflows/**/*.md` |
-| `adr` | System | `builtin.markdown_frontmatter` | `**/docs/arquitetura/**/*.md`, `**/docs/adr/**/*.md` |
+| Dimensão   | Pilar          | Parser                         | Fonte                                                |
+| ---------- | -------------- | ------------------------------ | ---------------------------------------------------- |
+| `spec`     | Intent         | `builtin.markdown_frontmatter` | `specs/**/plan.md` (filesystem)                      |
+| `service`  | System         | `builtin.agents_manifest`      | `AGENTS.md` / `agents.md` (github_api ou filesystem) |
+| `workflow` | Implementation | `builtin.markdown_frontmatter` | `**/temporal/**/*.yaml`, `**/workflows/**/*.md`      |
+| `adr`      | System         | `builtin.markdown_frontmatter` | `**/docs/arquitetura/**/*.md`, `**/docs/adr/**/*.md` |
 
 Configure as dimensões ativas em `cortex.config.yaml`:
+
 ```yaml
 active_dimensions:
   - spec
@@ -117,6 +120,7 @@ active_dimensions:
 A v3 introduz um pipeline de parser genérico. Para adicionar um extractor customizado:
 
 1. Crie `plugins/meu_parser.py` herdando de `BaseCortexExtractor`:
+
    ```python
    from app.core.parsers.base import BaseCortexExtractor, NodeData, ParseResult
 
@@ -191,26 +195,39 @@ docker compose --env-file .env up -d
 
 ### Variáveis obrigatórias
 
-| Variável | Descrição | Default |
-|----------|-----------|---------|
-| `NEO4J_URI` | URI do Neo4j | `bolt://localhost:7687` |
-| `NEO4J_USER` | Usuário Neo4j | `neo4j` |
-| `NEO4J_PASSWORD` | Senha Neo4j | `cortex-secret` |
-| `CORTEX_API_TOKEN` | Token de autenticação da API | `dev-token` |
+| Variável           | Descrição                    | Default                 |
+| ------------------ | ---------------------------- | ----------------------- |
+| `NEO4J_URI`        | URI do Neo4j                 | `bolt://localhost:7687` |
+| `NEO4J_USER`       | Usuário Neo4j                | `neo4j`                 |
+| `NEO4J_PASSWORD`   | Senha Neo4j                  | `cortex-secret`         |
+| `CORTEX_API_TOKEN` | Token de autenticação da API | `dev-token`             |
 
 ### Variáveis de filesystem
 
-| Variável | Descrição | Default |
-|----------|-----------|---------|
-| `WORKSPACE_ROOT` | Raiz montada no container (volume bind) | `/workspace` |
-| `SPECS_DIR` | Diretório das specs | `/specs` |
-| `REPOS_MOUNT_PATH` | Repos montados localmente (fallback) | `/repos` |
-| `GITHUB_TOKEN` | Token para source_type: github_api (repos privados) | — |
+| Variável           | Descrição                                           | Default      |
+| ------------------ | --------------------------------------------------- | ------------ |
+| `WORKSPACE_ROOT`   | Raiz montada no container (volume bind)             | `/workspace` |
+| `SPECS_DIR`        | Diretório das specs                                 | `/specs`     |
+| `REPOS_MOUNT_PATH` | Repos montados localmente (fallback)                | `/repos`     |
+| `GITHUB_TOKEN`     | Token para source_type: github_api (repos privados) | —            |
 
 ### Variáveis de Vector RAG (opcionais)
 
-| Variável | Descrição | Default |
-|----------|-----------|---------|
-| `CORTEX_EMBEDDING_PROVIDER` | `none` \| `local` \| `openai` | `none` |
-| `CORTEX_EMBEDDING_MODEL` | Modelo para provider `local` | `all-MiniLM-L6-v2` |
-| `OPENAI_API_KEY` | Chave OpenAI (apenas provider `openai`) | — |
+| Variável                    | Descrição                               | Default            |
+| --------------------------- | --------------------------------------- | ------------------ |
+| `CORTEX_EMBEDDING_PROVIDER` | `none` \| `local` \| `openai`           | `none`             |
+| `CORTEX_EMBEDDING_MODEL`    | Modelo para provider `local`            | `all-MiniLM-L6-v2` |
+| `OPENAI_API_KEY`            | Chave OpenAI (apenas provider `openai`) | —                  |
+
+---
+
+## 🔜 Em breve
+
+Funcionalidades planejadas para as próximas versões:
+
+- **CLI standalone** — `cortex-context` como pacote pip instalável globalmente, com os comandos `ingest`, `query`, `doctor` e `status` sem precisar subir o servidor FastAPI
+- **Dimensão `github-issue`** — ingesta issues e PRs do GitHub como nós `Intent`, relacionados automaticamente às specs por label/título
+- **Dimensão `confluence`** — parser para páginas Confluence via API, mapeando documentos técnicos para `System` e `Intent`
+- **UI web embarcada** — explorador visual do grafo servido diretamente pelo FastAPI (sem dependências externas)
+- **Diff-aware ingest** — ingestão incremental baseada em `git diff`, reprocessando apenas arquivos alterados desde o último ingest
+- **MCP Tools ampliados** — novos tools `get_impact_analysis`, `list_dimensions` e `get_node_context` para agentes que precisam de traversal explícito no grafo
