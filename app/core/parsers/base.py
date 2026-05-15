@@ -52,6 +52,8 @@ CANONICAL_EDGES = {
     # Runtime
     "OBSERVED_IN",       # Alerta observado em Serviço
     "DEPLOYED_TO",       # Artefato deployado em Ambiente
+    # Vector RAG
+    "CHUNK_OF",          # DocumentChunk pertence a um nó pai (Spec, ADR, etc.)
 }
 
 
@@ -97,6 +99,44 @@ class ParseResult:
     """Resultado de extração: nós + arestas."""
     nodes: list[NodeData] = field(default_factory=list)
     edges: list[EdgeData] = field(default_factory=list)
+
+
+def make_chunk_node(
+    parent_id: str,
+    chunk_index: int,
+    content: str,
+    pillar: str,
+    *,
+    embedding: list[float] | None = None,
+) -> NodeData:
+    """
+    Cria um NodeData representando um DocumentChunk filho de um nó pai.
+
+    O nó recebe labels ["DocumentChunk", pillar] para permitir queries
+    cross-pilar no índice vetorial.
+
+    Args:
+        parent_id:   ID do nó pai (ex: "spec-070")
+        chunk_index: Índice sequencial do chunk (0-based)
+        content:     Texto do chunk (pronto para embedding)
+        pillar:      Pilar I.S.I.R do pai (ex: "Intent")
+        embedding:   Vetor float opcional; None até que o embedder processe.
+    """
+    chunk_id = f"{parent_id}__chunk_{chunk_index}"
+    props: dict = {
+        "id": chunk_id,
+        "parent_id": parent_id,
+        "chunk_index": chunk_index,
+        "content": content,
+        "pillar": pillar,
+    }
+    if embedding is not None:
+        props["embedding"] = embedding
+    return NodeData(
+        node_labels=["DocumentChunk", pillar],
+        node_id=chunk_id,
+        properties=props,
+    )
 
 
 # ─── Interface base ────────────────────────────────────────────────────────────

@@ -1,0 +1,92 @@
+# app/dimensions/adr.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar System — Architecture Decision Records (ADRs)
+#
+# Representa o "Como" (alto nível) do sistema: decisões arquiteturais,
+# trade-offs, contexto de design, e razões históricas de por que o sistema
+# está estruturado de determinada forma.
+#
+# Padrão de ADR suportado:
+#   - MADR (Markdown Any Decision Records) — https://adr.github.io/madr/
+#   - ADR simples com frontmatter YAML (title, status, date)
+#   - Qualquer .md em docs/arquitetura/ ou docs/adr/
+#
+# Cada arquivo gera um nó (:ADR:System) com:
+#   id     → adr-{slug} (derivado do caminho do arquivo)
+#   title  → # H1 ou frontmatter.title
+#   status → proposed | accepted | deprecated | superseded | rejected
+#   summary → primeiro parágrafo ou frontmatter.summary
+#   labels → tags inferidas do conteúdo (ex: ["mongodb", "temporal", "auth"])
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: adr
+node_label: ADR
+pillar: System
+parser: builtin.markdown_frontmatter
+source_type: filesystem
+source_path: "/workspace"
+source_patterns:
+  - "**/docs/arquitetura/**/*.md"
+  - "**/docs/adr/**/*.md"
+  - "**/docs/architecture/**/*.md"
+  - "**/docs/decisions/**/*.md"
+  # Exclui arquivos de índice e sumários
+  # (o parser ignora arquivos sem corpo substantivo — menos de 200 chars)
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador único do ADR (ex: adr-0042-use-temporal-io)"
+  - name: title
+    type: string
+    required: true
+    description: "Título legível do ADR"
+  - name: status
+    type: string
+    description: "Status: proposed | accepted | deprecated | superseded | rejected"
+  - name: summary
+    type: string
+    description: "Resumo de uma linha do contexto/decisão"
+  - name: date
+    type: string
+    description: "Data da decisão (YYYY-MM-DD)"
+  - name: labels
+    type: list[string]
+    description: "Tags semânticas inferidas do slug e do frontmatter (ex: temporal, mongodb, auth)"
+
+relationships:
+  - type: SUPERSEDES
+    direction: outbound
+    target_label: ADR
+    description: "Este ADR substitui um ADR anterior"
+    built_by: parser
+  - type: RELATED_TO
+    direction: outbound
+    target_label: ADR
+    description: "ADRs relacionados no mesmo domínio técnico"
+    built_by: parser
+  - type: AFFECTS
+    direction: outbound
+    target_label: Service
+    description: "Este ADR afeta diretamente a arquitetura de um serviço"
+    built_by: parser
+  - type: MOTIVATED_BY
+    direction: outbound
+    target_label: Spec
+    description: "Este ADR foi motivado por uma spec/requisito"
+    built_by: parser
+  - type: IMPLEMENTS_DECISION
+    direction: outbound
+    target_label: Workflow
+    description: "Este ADR resultou na implementação de um workflow"
+    built_by: parser
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT adr_id IF NOT EXISTS FOR (n:ADR) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: adr_fulltext
+    properties: [title, summary, labels_str]
+    cypher: "CREATE FULLTEXT INDEX adr_fulltext IF NOT EXISTS FOR (n:ADR) ON EACH [n.title, n.summary, n.labels_str]"

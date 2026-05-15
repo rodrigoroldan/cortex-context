@@ -38,6 +38,7 @@ active_dimensions:
   - spec # Intent:Spec  — especificações do produto
   - service # System:Service — microserviços e componentes
   - workflow # Implementation:Workflow — fluxos assíncronos
+  - adr # System:ADR — Architecture Decision Records
 
 # ─── Fonte filesystem ────────────────────────────────────────────────────────
 # Configurações globais para parsers que leem o filesystem local.
@@ -94,3 +95,21 @@ temporal_workflow_manifest:
   repo: backend-role-organizado
   branch: develop
   path: temporal-workflows.yaml
+
+# ─── Vector RAG (Embeddings) ──────────────────────────────────────────────────
+# Configuração de embeddings para busca semântica híbrida.
+# O provider pode ser sobrescrito via env var CORTEX_EMBEDDING_PROVIDER.
+#
+# Modos disponíveis:
+#   none   → (padrão) Desabilitado. Apenas FTS. Nenhuma dep extra necessária.
+#   local  → sentence-transformers offline (all-MiniLM-L6-v2, 384 dims).
+#            Requer: pip install "cortex-role-organizado[embeddings-local]"
+#   openai → OpenAI text-embedding-3-small (1536 dims). Requer OPENAI_API_KEY.
+#            Requer: pip install "cortex-role-organizado[embeddings-openai]"
+#
+# chunk_size e chunk_overlap controlam a fragmentação dos documentos.
+# Valores menores = chunks mais precisos mas mais fragmentados.
+vector:
+  provider: "${CORTEX_EMBEDDING_PROVIDER:none}"
+  chunk_size: 600
+  chunk_overlap: 100

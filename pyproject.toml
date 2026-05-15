@@ -1,7 +1,7 @@
 [project]
 name = "cortex-role-organizado"
-version = "0.1.0"
-description = "Cortex — Product Knowledge Graph para contextualização de specs (Neo4j + FastAPI)"
+version = "0.2.0"
+description = "Cortex — Product Knowledge Graph (GraphRAG + Vector RAG) para contextualização de produto"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,6 +22,12 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.4.0",
 ]
+# Embeddings locais (offline, ~22MB, 384 dims — sem GPU necessária)
+# Instalar com: pip install "cortex-role-organizado[embeddings-local]"
+embeddings-local = ["sentence-transformers>=2.7.0"]
+# Embeddings via OpenAI API (1536 dims — requer OPENAI_API_KEY)
+# Instalar com: pip install "cortex-role-organizado[embeddings-openai]"
+embeddings-openai = ["openai>=1.30.0"]
 
 [project.scripts]
 cortex-ingest = "cortex.ingestor.cli:app"
