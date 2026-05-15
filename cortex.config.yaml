@@ -89,13 +89,6 @@ repos_mount_path: "/repos"
 # local: lê do volume /repos montado no container (requer cópia manual)
 ingest_strategy: "github"
 
-# Manifesto dos Temporal Workflows (usado por POST /api/v1/ingest/workflows)
-# O parser busca temporal-workflows.yaml no repo/branch/path configurados
-temporal_workflow_manifest:
-  repo: backend-role-organizado
-  branch: develop
-  path: temporal-workflows.yaml
-
 # ─── Vector RAG (Embeddings) ──────────────────────────────────────────────────
 # Configuração de embeddings para busca semântica híbrida.
 # O provider pode ser sobrescrito via env var CORTEX_EMBEDDING_PROVIDER.
