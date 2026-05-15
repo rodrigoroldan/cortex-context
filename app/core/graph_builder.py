@@ -1,8 +1,13 @@
 """
-core/graph_builder.py — Persiste nós e arestas genéricos no Neo4j.
+core/graph_builder.py — Persiste nós e arestas no Neo4j com suporte a multi-labels.
 
-Versão dimension-agnostic do graph_builder original.
-Suporta qualquer node_label e qualquer conjunto de propriedades.
+Estratégia de multi-labels (I.S.I.R):
+  - MERGE na label primária + id (ex: MERGE (n:Spec {id: $id}))
+  - SET adiciona o pilar como label extra (ex: SET n:Intent)
+  - Qualquer número de labels extras é suportado
+
+Isso preserva a semântica do MERGE (chave única) enquanto
+adiciona a camada de pilares para queries cross-dimensional.
 """
 from __future__ import annotations
 
@@ -17,14 +22,21 @@ logger = logging.getLogger(__name__)
 
 async def upsert_node(driver: AsyncDriver, node: NodeData) -> None:
     """
-    Cria ou atualiza um nó no Neo4j (MERGE por id).
+    Cria ou atualiza um nó no Neo4j com suporte a multi-labels.
 
-    O node_label é usado como label do nó. Qualquer propriedade extra é persistida.
+    MERGE usa a primary_label + id como chave de upsert.
+    Labels adicionais (ex: pilar Intent/System) são aplicados via SET.
     """
+    primary = node.primary_label
+    extra_labels = [lbl for lbl in node.node_labels if lbl != primary]
+
+    set_labels_clause = f"SET n:{':'.join(extra_labels)}" if extra_labels else ""
+
     async with driver.session() as session:
         await session.run(
             f"""
-            MERGE (n:{node.node_label} {{id: $id}})
+            MERGE (n:{primary} {{id: $id}})
+            {set_labels_clause}
             SET n += $props
             """,
             id=node.node_id,
@@ -34,9 +46,9 @@ async def upsert_node(driver: AsyncDriver, node: NodeData) -> None:
 
 async def upsert_edge(driver: AsyncDriver, edge: EdgeData) -> None:
     """
-    Cria ou atualiza uma aresta entre dois nós quaisquer (MERGE por ids e tipo).
+    Cria ou atualiza uma aresta entre dois nós quaisquer.
 
-    Os nós de origem e destino são localizados pelo id, independente do label.
+    Localiza os nós pelo id (independente de labels), mantendo agnósticidade.
     """
     async with driver.session() as session:
         await session.run(
@@ -60,7 +72,12 @@ async def ingest_nodes(driver: AsyncDriver, nodes: list[NodeData]) -> int:
             await upsert_node(driver, node)
             count += 1
         except Exception as e:
-            logger.error("Erro ao upsert nó %s (%s): %s", node.node_id, node.node_label, e)
+            logger.error(
+                "Erro ao upsert nó %s (%s): %s",
+                node.node_id,
+                ":".join(node.node_labels),
+                e,
+            )
     return count
 
 
@@ -72,7 +89,13 @@ async def ingest_edges(driver: AsyncDriver, edges: list[EdgeData]) -> int:
             await upsert_edge(driver, edge)
             count += 1
         except Exception as e:
-            logger.error("Erro ao upsert aresta %s→%s [%s]: %s", edge.from_id, edge.to_id, edge.relationship, e)
+            logger.error(
+                "Erro ao upsert aresta %s→%s [%s]: %s",
+                edge.from_id,
+                edge.to_id,
+                edge.relationship,
+                e,
+            )
     return count
 
 
@@ -82,5 +105,5 @@ async def create_constraint_if_not_exists(driver: AsyncDriver, cypher: str) -> N
         async with driver.session() as session:
             await session.run(cypher)
     except Exception as e:
-        # Constraint pode já existir com nome diferente — log e segue
         logger.warning("Erro ao criar constraint/índice: %s | Cypher: %s", e, cypher)
+

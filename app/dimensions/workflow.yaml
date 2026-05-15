@@ -1,0 +1,63 @@
+# app/dimensions/workflow.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar Implementation — Workflows e Orquestração
+#
+# Representa o "O Quê" concreto: workflows Temporal, jobs agendados,
+# pipelines CI/CD, automações. Tudo que executa lógica de negócio.
+#
+# Fonte: YAMLs de definição de workflow ou arquivos Java/Python anotados.
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: workflow
+node_label: Workflow
+pillar: Implementation
+parser: builtin.markdown_frontmatter
+source_type: filesystem
+source_path: "/workspace"
+source_patterns:
+  - "**/temporal/**/*.yaml"
+  - "**/workflows/**/*.md"
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador único do workflow (ex: workflow-payment-expiration)"
+  - name: name
+    type: string
+    description: "Nome legível do workflow"
+  - name: schedule
+    type: string
+    description: "Expressão cron ou descrição do schedule (se agendado)"
+  - name: mode
+    type: string
+    description: "Modo de operação: DISABLED | SHADOW | PRIMARY"
+  - name: service
+    type: string
+    description: "Serviço que contém este workflow"
+
+relationships:
+  - type: IMPLEMENTS
+    direction: outbound
+    target_label: Spec
+    description: "Este workflow implementa uma spec de produto"
+    built_by: relationship_builder
+  - type: DEPLOYED_TO
+    direction: outbound
+    target_label: Service
+    description: "Este workflow é executado por este serviço"
+    built_by: relationship_builder
+  - type: TRIGGERS
+    direction: outbound
+    target_label: Workflow
+    description: "Este workflow dispara outro workflow"
+    built_by: relationship_builder
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT workflow_id IF NOT EXISTS FOR (n:Workflow) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: workflow_fulltext
+    properties: [name, schedule, mode]
+    cypher: "CREATE FULLTEXT INDEX workflow_fulltext IF NOT EXISTS FOR (n:Workflow) ON EACH [n.name, n.schedule, n.mode]"

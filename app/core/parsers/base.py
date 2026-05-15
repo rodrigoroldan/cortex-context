@@ -1,60 +1,142 @@
 """
-parsers/base.py — Classe abstrata para todos os dimension parsers do Cortex.
+parsers/base.py — Interfaces base do Cortex Context.
+
+Ontologia I.S.I.R — 4 pilares universais:
+  Intent         — O "Por quê". Specs, Requisitos, Épicos, User Stories.
+  System         — O "Como" (alto nível). Serviços, Bancos, APIs, ADRs.
+  Implementation — O "O quê" (concreto). Módulos, Funções, Componentes, Workflows.
+  Runtime        — O "Mundo real". Alertas, Traces, Deployments, Incidentes.
+
+No Neo4j cada nó recebe multi-labels: a label do pilar + a label da entidade.
+  Ex: (:Intent:Spec), (:System:Service), (:Implementation:Workflow), (:Runtime:Alert)
+
+Para criar um parser/extractor customizado (plugin):
+  1. Herde de BaseCortexExtractor
+  2. Defina extractor_key = "minha.chave"
+  3. Implemente can_parse() e parse()
+  4. Coloque o arquivo em plugins/ — o Cortex o descobre automaticamente
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from app.core.dimension_loader import DimensionConfig
+
+# ─── Pilares canônicos ─────────────────────────────────────────────────────────
+
+PILLARS = {"Intent", "System", "Implementation", "Runtime"}
+
+# ─── Arestas canônicas (agnósticas ao produto) ────────────────────────────────
+
+CANONICAL_EDGES = {
+    # Intent ↔ Intent
+    "DEPENDS_ON",        # Spec A requer Spec B
+    "SUPERSEDES",        # Spec A substitui Spec B
+    "EVOLVES_FROM",      # Spec A é evolução de Spec B
+    "RELATED_TO",        # Referência cruzada genérica
+    # Intent → System / Implementation
+    "AFFECTS",           # Spec afeta Serviço / Componente
+    "IMPLEMENTS",        # Entidade implementa uma Spec
+    # System ↔ System / Implementation
+    "EXPOSES",           # Serviço expõe EndpointAPI
+    "DEPENDS_ON",        # (reusado) Serviço depende de Serviço
+    # Implementation
+    "CALLS",             # Função A chama Função B
+    "IMPORTS",           # Módulo A importa Módulo B
+    "TRIGGERS",          # Workflow A dispara Workflow B
+    "MUTATES",           # Operação muta DomainEntity
+    # Runtime
+    "OBSERVED_IN",       # Alerta observado em Serviço
+    "DEPLOYED_TO",       # Artefato deployado em Ambiente
+}
+
+
+# ─── Estruturas de dados ───────────────────────────────────────────────────────
 
 
 @dataclass
 class NodeData:
-    """Dados de um nó extraído por um parser, pronto para upsert no Neo4j."""
-    node_label: str           # ex: "Spec", "Service"
-    node_id: str              # id único do nó (ex: "spec-070", "service-bff")
-    properties: dict          # campos do nó (incluindo o 'id')
+    """
+    Representa um nó pronto para upsert no Neo4j.
+
+    node_labels: lista de labels a aplicar no nó.
+      - node_labels[0] é a label primária usada no MERGE (ex: "Spec").
+      - As demais são aplicadas via SET (ex: "Intent").
+    Exemplo: NodeData(node_labels=["Spec", "Intent"], node_id="spec-070", ...)
+    """
+    node_labels: list[str]   # ex: ["Spec", "Intent"]
+    node_id: str             # id único (ex: "spec-070", "service-bff")
+    properties: dict         # propriedades do nó (sempre inclui 'id')
+
+    @property
+    def primary_label(self) -> str:
+        """Label primária usada no MERGE (primeira da lista)."""
+        return self.node_labels[0] if self.node_labels else "Node"
+
+    @property
+    def pillar_label(self) -> str | None:
+        """Label do pilar I.S.I.R (segunda da lista, se presente)."""
+        return self.node_labels[1] if len(self.node_labels) > 1 else None
 
 
 @dataclass
 class EdgeData:
-    """Dados de uma aresta criada diretamente pelo parser (não pelo relationship_builder)."""
+    """Representa uma aresta entre dois nós no grafo."""
     from_id: str
     to_id: str
-    relationship: str
+    relationship: str        # Use CANONICAL_EDGES quando possível
     properties: dict = field(default_factory=dict)
 
 
 @dataclass
 class ParseResult:
-    """Resultado completo de um parse: nós + arestas diretas."""
+    """Resultado de extração: nós + arestas."""
     nodes: list[NodeData] = field(default_factory=list)
     edges: list[EdgeData] = field(default_factory=list)
 
 
-class DimensionParser(ABC):
-    """
-    Interface base para todos os parsers de dimension.
+# ─── Interface base ────────────────────────────────────────────────────────────
 
-    Um parser é responsável por:
-    1. Determinar se consegue processar um arquivo (can_parse)
-    2. Extrair NodeData (e opcionalmente EdgeData) de um arquivo (parse)
+
+class BaseCortexExtractor(ABC):
     """
+    Interface base para todos os extractors do Cortex Context.
+
+    Um extractor lê uma fonte de dados (arquivo, API, DB) e produz
+    NodeData + EdgeData para ingestão no Knowledge Graph.
+
+    Para criar um plugin customizado:
+      1. Herde desta classe
+      2. Defina extractor_key (único, ex: "jira.epic")
+      3. Implemente can_parse() e parse()
+      4. Coloque o arquivo em plugins/ — o Cortex descobre automaticamente
+    """
+
+    extractor_key: ClassVar[str] = ""
 
     @abstractmethod
     def can_parse(self, file_path: Path) -> bool:
-        """Retorna True se este parser sabe processar o arquivo dado."""
+        """Retorna True se este extractor sabe processar o arquivo dado."""
         ...
 
     @abstractmethod
-    def parse(self, file_path: Path) -> ParseResult:
+    def parse(self, file_path: Path, dimension_config: "DimensionConfig") -> ParseResult:
         """
-        Parseia o arquivo e retorna nós + arestas.
+        Extrai nós e arestas de um arquivo.
 
         Args:
-            file_path: Caminho absoluto do arquivo a ser parseado.
+            file_path: Caminho absoluto do arquivo a ser processado.
+            dimension_config: Config da dimensão (pillar, node_label, etc.)
 
         Returns:
-            ParseResult com listas de NodeData e EdgeData.
+            ParseResult com NodeData e EdgeData.
         """
         ...
+
+
+# Alias backward-compatible para código legado
+DimensionParser = BaseCortexExtractor

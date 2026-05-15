@@ -1,8 +1,15 @@
 """
 dimension_loader.py — Carrega e valida dimension specs YAML.
 
-Lê arquivos .yaml em app/dimensions/, valida campos obrigatórios e retorna
-uma lista de DimensionConfig prontos para uso pelo ingest pipeline.
+Cada dimension YAML define:
+  - pillar: Um dos 4 pilares I.S.I.R (Intent | System | Implementation | Runtime)
+  - node_label: Label específica da entidade (ex: "Spec", "Service", "Workflow")
+  - parser: Chave do extractor a usar (builtin.* ou plugin customizado)
+  - source_type: filesystem | github_api | url | plugin
+  - source_path: Caminho/URL/referência da fonte de dados
+
+No Neo4j o nó recebe multi-labels: [node_label, pillar]
+  Ex: pillar=Intent, node_label=Spec → MERGE (n:Spec) SET n:Intent
 """
 from __future__ import annotations
 
@@ -13,6 +20,9 @@ from pathlib import Path
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# Pilares válidos da ontologia I.S.I.R
+VALID_PILLARS = {"Intent", "System", "Implementation", "Runtime"}
 
 
 @dataclass
@@ -45,13 +55,22 @@ class IndexConfig:
 
 @dataclass
 class DimensionConfig:
-    dimension: str          # ex: "spec", "service"
-    node_label: str         # ex: "Spec", "Service"
-    parser: str             # chave no ParserRegistry
+    dimension: str           # ex: "spec", "service", "workflow"
+    node_label: str          # ex: "Spec", "Service", "Workflow"
+    pillar: str              # Intent | System | Implementation | Runtime
+    parser: str              # chave no ParserRegistry (ex: "builtin.markdown_frontmatter")
+    source_type: str         # filesystem | github_api | url | plugin
+    source_path: str         # caminho/URL/referência da fonte
     source_patterns: list[str]
     fields: list[FieldConfig] = field(default_factory=list)
     relationships: list[RelationshipConfig] = field(default_factory=list)
     indexes: list[IndexConfig] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)  # campos adicionais livres
+
+    @property
+    def node_labels(self) -> list[str]:
+        """Retorna a lista de labels multi-label: [entity_label, pillar_label]."""
+        return [self.node_label, self.pillar]
 
 
 def _parse_field(raw: dict) -> FieldConfig:
@@ -98,26 +117,49 @@ def load_dimension(yaml_path: Path) -> DimensionConfig | None:
         return None
 
     # Campos obrigatórios
-    for required_key in ("dimension", "node_label", "parser"):
+    for required_key in ("dimension", "node_label", "pillar", "parser"):
         if not raw.get(required_key):
             logger.error("Campo obrigatório '%s' ausente em %s", required_key, yaml_path)
             return None
 
-    # source_pattern ou source_patterns
+    # Validar pillar
+    pillar = raw["pillar"]
+    if pillar not in VALID_PILLARS:
+        logger.error(
+            "Pilar inválido '%s' em %s. Use: %s",
+            pillar,
+            yaml_path,
+            ", ".join(sorted(VALID_PILLARS)),
+        )
+        return None
+
+    # source_pattern ou source_patterns (opcional)
     patterns: list[str] = []
     if "source_pattern" in raw:
         patterns = [raw["source_pattern"]]
     elif "source_patterns" in raw:
         patterns = raw["source_patterns"]
 
+    # Reservar campos conhecidos; o restante vai em extra
+    known_keys = {
+        "dimension", "node_label", "pillar", "parser",
+        "source_type", "source_path", "source_pattern", "source_patterns",
+        "fields", "relationships", "indexes",
+    }
+    extra = {k: v for k, v in raw.items() if k not in known_keys}
+
     return DimensionConfig(
         dimension=raw["dimension"],
         node_label=raw["node_label"],
+        pillar=raw["pillar"],
         parser=raw["parser"],
+        source_type=raw.get("source_type", "filesystem"),
+        source_path=raw.get("source_path", ""),
         source_patterns=patterns,
         fields=[_parse_field(f) for f in raw.get("fields", [])],
         relationships=[_parse_relationship(r) for r in raw.get("relationships", [])],
         indexes=[_parse_index(i) for i in raw.get("indexes", [])],
+        extra=extra,
     )
 
 
@@ -142,6 +184,12 @@ def load_dimensions(dimensions_dir: Path, active_dimensions: list[str]) -> list[
         config = load_dimension(yaml_path)
         if config is not None:
             configs.append(config)
-            logger.info("Dimension carregada: %s (node_label=%s, parser=%s)", dim_name, config.node_label, config.parser)
+            logger.info(
+                "Dimension carregada: %s (pillar=%s, node_label=%s, parser=%s)",
+                dim_name,
+                config.pillar,
+                config.node_label,
+                config.parser,
+            )
 
     return configs

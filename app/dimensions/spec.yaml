@@ -1,75 +1,79 @@
-# Dimension: Spec
-# Formaliza a dimensão existente de nós :Spec no grafo Cortex.
-# Fonte: specs/**/plan.md em role-organizado-workspace
+# app/dimensions/spec.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar Intent — Especificações do Produto
+#
+# Representa o "Por Quê" do sistema. Qualquer documento que captura
+# intenção de produto: specs, requisitos, épicos, user stories, RFCs.
+#
+# Cada arquivo gera um nó (:Spec:Intent) com:
+#   id     → spec-{NNN} ou spec-{slug}
+#   title  → # H1 ou frontmatter.title
+#   status → frontmatter.status ou "unknown"
+#   labels → inferidos do slug + frontmatter.labels
+# ─────────────────────────────────────────────────────────────────────────────
 
 dimension: spec
 node_label: Spec
-parser: spec_md
+pillar: Intent
+parser: builtin.markdown_frontmatter
+source_type: filesystem
+source_path: "/specs"
+source_patterns:
+  - "**/plan.md"
+  - "**/spec.md"
+  - "**/README.md"
 
-# Padrão glob para localizar arquivos fonte (relativo à raiz do repo workspace)
-source_pattern: "specs/**/plan.md"
-
-# Campos extraídos por spec_parser (documentados aqui como referência)
 fields:
   - name: id
     type: string
-    description: "Identificador único — ex: spec-070"
     required: true
-  - name: number
-    type: integer
-    description: "Número sequencial da spec"
-    required: true
+    description: "Identificador único da spec (ex: spec-042)"
   - name: title
     type: string
-    description: "Título extraído do H1 do plan.md"
+    required: true
+    description: "Título legível da spec"
   - name: status
     type: string
-    description: "completed | in-progress | planned | todo"
-  - name: labels
-    type: list[string]
-    description: "Labels inferidos do slug + conteúdo"
+    description: "Status: planned | in-progress | done | deprecated"
   - name: summary
     type: string
-    description: "Primeira frase significativa do plan.md"
-  - name: repos
+    description: "Resumo de uma linha da spec"
+  - name: labels
     type: list[string]
-    description: "Repos mencionados no texto"
-  - name: file_path
-    type: string
-    description: "Caminho relativo ao arquivo fonte"
-  - name: labels_str
-    type: string
-    description: "Labels concatenados — usado no índice FTS"
+    description: "Tags semânticas inferidas do slug e do frontmatter"
 
-# Tipos de relacionamentos produzidos por este parser
 relationships:
-  - type: SUPERSEDES
-    direction: outbound
-    description: "Esta spec substitui outra"
-  - type: EVOLVES_FROM
-    direction: outbound
-    description: "Esta spec é evolução de outra"
   - type: DEPENDS_ON
     direction: outbound
-    description: "Esta spec depende de outra"
+    target_label: Spec
+    description: "Esta spec depende de outra spec"
+    built_by: parser
+  - type: SUPERSEDES
+    direction: outbound
+    target_label: Spec
+    description: "Esta spec substitui uma spec mais antiga"
+    built_by: parser
+  - type: EVOLVES_FROM
+    direction: outbound
+    target_label: Spec
+    description: "Evolução de outra spec"
+    built_by: parser
   - type: RELATED_TO
     direction: outbound
-    description: "Referência cruzada genérica"
-  - type: IMPLEMENTS
-    direction: outbound
-    description: "Esta spec implementa outra"
+    target_label: Spec
+    description: "Specs relacionadas"
+    built_by: parser
   - type: AFFECTS
     direction: outbound
     target_label: Service
-    description: "Esta spec afeta um serviço (via Spec.repos[])"
-    built_by: relationship_builder  # gerado em pós-processamento
+    description: "Esta spec afeta um serviço"
+    built_by: relationship_builder
 
-# Índices criados no Neo4j para esta dimensão
 indexes:
   - type: constraint_unique
     property: id
-    cypher: "CREATE CONSTRAINT spec_id IF NOT EXISTS FOR (s:Spec) REQUIRE s.id IS UNIQUE"
+    cypher: "CREATE CONSTRAINT spec_id IF NOT EXISTS FOR (n:Spec) REQUIRE n.id IS UNIQUE"
   - type: fulltext
-    name: spec_fts
+    name: spec_fulltext
     properties: [title, summary, labels_str]
-    cypher: "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS FOR (s:Spec) ON EACH [s.title, s.summary, s.labels_str]"
+    cypher: "CREATE FULLTEXT INDEX spec_fulltext IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]"

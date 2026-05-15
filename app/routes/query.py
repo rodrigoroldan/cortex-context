@@ -1,17 +1,18 @@
 """
-routes/query.py — Consulta semântica cross-dimension ao grafo.
+routes/query.py — Consulta semântica cross-dimension ao grafo Cortex Context.
 
 Endpoints:
-  GET /api/v1/query?keywords=chat,ai   → subgrafo ~500 tokens de specs relevantes
+  GET /api/v1/query?keywords=chat,ai            → subgrafo ~500 tokens por keywords
+  GET /api/v1/query?keywords=payment&pillar=Intent  → filtrado por pilar I.S.I.R
+  GET /api/v1/query?keywords=auth&dimension=spec    → filtrado por dimensão
 
-Os endpoints /specs, /specs/{id} e POST /ingest foram migrados para:
-  GET  /api/v1/nodes/spec              (lista specs)
-  GET  /api/v1/nodes/spec/{id}         (spec + vizinhos 1-hop)
-  POST /api/v1/ingest/spec             (re-ingesta specs)
+A busca é totalmente genérica — não assume labels fixas (Spec, Service, etc.).
+Usa o índice FTS configurado por dimensão no YAML.
 """
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -31,116 +32,148 @@ def _verify_token(
     settings=Depends(get_settings),
 ) -> str:
     if credentials.credentials != settings.cortex_api_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     return credentials.credentials
 
 
 # ─── Response models ──────────────────────────────────────────────────────────
 
 
-class SpecSummary(BaseModel):
+class NodeContext(BaseModel):
+    """Nó genérico do grafo — qualquer dimensão/pilar."""
     id: str
-    number: int
-    title: str
-    status: str
-    labels: list[str]
-    summary: str
-    repos: list[str]
-    file_path: str
+    labels: list[str]         # ex: ["Spec", "Intent"]
+    pillar: str               # ex: "Intent"
+    properties: dict[str, Any]
+    # Campos de conveniência extraídos de properties (se disponíveis)
+    title: str = ""
+    summary: str = ""
+    status: str = ""
 
 
-class EdgeSummary(BaseModel):
+class EdgeContext(BaseModel):
     from_id: str
     to_id: str
     relationship: str
 
 
-class ServiceRef(BaseModel):
-    id: str
-    name: str
-    repo: str
-
-
 class SubgraphResponse(BaseModel):
-    nodes: list[SpecSummary]
-    edges: list[EdgeSummary]
+    nodes: list[NodeContext]
+    edges: list[EdgeContext]
     token_estimate: int
-    affected_services: list[ServiceRef] = []
+    query_meta: dict[str, Any] = {}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _node_row_to_summary(row: dict) -> SpecSummary:
-    return SpecSummary(
-        id=row.get("id", ""),
-        number=row.get("number", 0),
-        title=row.get("title", ""),
-        status=row.get("status", ""),
-        labels=row.get("labels", []),
-        summary=row.get("summary", ""),
-        repos=row.get("repos", []),
-        file_path=row.get("file_path", ""),
+def _neo4j_node_to_context(node_data: dict, labels: list[str]) -> NodeContext:
+    """Converte um record do Neo4j para NodeContext genérico."""
+    pillar = node_data.get("pillar", "")
+    # Inferir pilar a partir dos labels se não for propriedade do nó
+    if not pillar:
+        for lbl in labels:
+            if lbl in ("Intent", "System", "Implementation", "Runtime"):
+                pillar = lbl
+                break
+
+    return NodeContext(
+        id=node_data.get("id", ""),
+        labels=labels,
+        pillar=pillar,
+        properties=dict(node_data),
+        title=str(node_data.get("title", "")),
+        summary=str(node_data.get("summary", "")),
+        status=str(node_data.get("status", "")),
     )
 
 
-def _estimate_tokens(nodes: list[SpecSummary]) -> int:
+def _estimate_tokens(nodes: list[NodeContext]) -> int:
     """Estimativa grosseira: ~4 chars por token."""
-    total_chars = sum(
-        len(n.id) + len(n.title) + len(n.summary) + len(" ".join(n.labels)) + len(" ".join(n.repos))
-        for n in nodes
-    )
-    return total_chars // 4
+    total = sum(len(n.title) + len(n.summary) + len(n.id) + 20 for n in nodes)
+    return total // 4
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 
-@router.get("/query", response_model=SubgraphResponse)
+@router.get(
+    "/query",
+    response_model=SubgraphResponse,
+    summary="Busca semântica cross-dimension por keywords",
+    description=(
+        "FTS cross-dimension usando os índices declarados nos dimension YAMLs. "
+        "Expande 1-hop no grafo para contexto de vizinhança. "
+        "Filtros opcionais: pillar (Intent|System|Implementation|Runtime), dimension (spec|service|...)."
+    ),
+)
 async def query_context(
     keywords: str,
     limit: int = 8,
     hops: int = 1,
+    pillar: str | None = None,
+    dimension: str | None = None,
     _token: str = Depends(_verify_token),
 ) -> SubgraphResponse:
-    """
-    Busca specs por keywords usando FTS e expande 1-hop no grafo.
-
-    - `keywords`: string separada por vírgulas, ex: `chat,ai,event`
-    - `limit`: máximo de nós seed retornados pelo FTS (default 8)
-    - `hops`: profundidade da expansão no grafo (default 1, max 2)
-    """
     driver = get_driver()
     keyword_list = [kw.strip() for kw in keywords.split(",") if kw.strip()]
     fts_query = " OR ".join(keyword_list)
-
-    hops = min(hops, 2)
+    hops = min(max(hops, 1), 2)
 
     async with driver.session() as session:
-        seed_result = await session.run(
-            """
-            CALL db.index.fulltext.queryNodes('spec_fts', $query)
-            YIELD node, score
-            RETURN node {.*} AS props, score
-            ORDER BY score DESC
-            LIMIT $limit
-            """,
-            {"query": fts_query, "limit": limit},
-        )
-        seed_records = await seed_result.data()
-        seed_ids = [r["props"]["id"] for r in seed_records]
+        # ── Seed: FTS cross-dimension ─────────────────────────────────────────
+        # Tenta múltiplos índices FTS conhecidos e une os resultados
+        fts_indexes = ["spec_fulltext", "service_fulltext", "workflow_fulltext"]
+        all_seed_ids: list[str] = []
+        seed_props: dict[str, dict] = {}
 
-        if not seed_ids:
-            return SubgraphResponse(nodes=[], edges=[], token_estimate=0)
+        for idx_name in fts_indexes:
+            try:
+                seed_result = await session.run(
+                    f"""
+                    CALL db.index.fulltext.queryNodes('{idx_name}', $query)
+                    YIELD node, score
+                    RETURN node {{.*}} AS props,
+                           labels(node) AS labels,
+                           score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                    """,
+                    {"query": fts_query, "limit": limit},
+                )
+                records = await seed_result.data()
+                for r in records:
+                    props = r.get("props") or {}
+                    nid = props.get("id", "")
+                    node_labels: list[str] = r.get("labels") or []
+                    if not nid:
+                        continue
+                    # Aplicar filtros opcionais
+                    if pillar and props.get("pillar", "") != pillar:
+                        if not any(lbl == pillar for lbl in node_labels):
+                            continue
+                    if nid not in all_seed_ids:
+                        all_seed_ids.append(nid)
+                        seed_props[nid] = {"props": props, "labels": node_labels}
+            except Exception:
+                # Índice não existe — pular silenciosamente
+                pass
 
+        if not all_seed_ids:
+            return SubgraphResponse(
+                nodes=[],
+                edges=[],
+                token_estimate=0,
+                query_meta={"keywords": keyword_list, "seed_count": 0},
+            )
+
+        # ── Expand: 1-hop neighbors ───────────────────────────────────────────
         expand_result = await session.run(
             f"""
-            MATCH (s:Spec) WHERE s.id IN $seed_ids
-            OPTIONAL MATCH path = (s)-[r*1..{hops}]-(neighbor:Spec)
-            WITH collect(DISTINCT s) + collect(DISTINCT neighbor) AS all_nodes,
+            MATCH (seed) WHERE seed.id IN $seed_ids
+            OPTIONAL MATCH path = (seed)-[r*1..{hops}]-(neighbor)
+            WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL
+            WITH collect(DISTINCT seed) + collect(DISTINCT neighbor) AS all_nodes,
                  collect(DISTINCT r) AS all_rels
             UNWIND all_nodes AS n
             WITH collect(DISTINCT n) AS nodes, all_rels
@@ -153,50 +186,40 @@ async def query_context(
                        type: type(rel)
                    }}) AS edges
             """,
-            seed_ids=seed_ids,
+            seed_ids=all_seed_ids,
         )
         expand_records = await expand_result.data()
 
-        nodes: list[SpecSummary] = []
-        edges: list[EdgeSummary] = []
+    # ── Montar resposta ───────────────────────────────────────────────────────
+    nodes: list[NodeContext] = []
+    edges: list[EdgeContext] = []
 
-        if expand_records:
-            row = expand_records[0]
-            for n in row.get("nodes", []):
-                if n:
-                    nodes.append(_node_row_to_summary(dict(n)))
-            for e in row.get("edges", []):
-                if e and e.get("from") and e.get("to"):
-                    edges.append(
-                        EdgeSummary(
-                            from_id=e["from"],
-                            to_id=e["to"],
-                            relationship=e["type"],
-                        )
-                    )
+    if expand_records:
+        row = expand_records[0]
+        for n in row.get("nodes", []):
+            if n and n.get("id"):
+                node_labels = list(n.labels) if hasattr(n, "labels") else []
+                # Enriquecer com labels do seed se disponível
+                if n["id"] in seed_props:
+                    node_labels = seed_props[n["id"]]["labels"]
+                nodes.append(_neo4j_node_to_context(dict(n), node_labels))
 
-    affected_services: list[ServiceRef] = []
-    if seed_ids:
-        async with driver.session() as session:
-            svc_result = await session.run(
-                """
-                MATCH (s:Spec)-[:AFFECTS]->(svc:Service)
-                WHERE s.id IN $seed_ids
-                RETURN DISTINCT svc.id AS id, svc.name AS name, svc.repo AS repo
-                ORDER BY svc.name
-                """,
-                seed_ids=seed_ids,
-            )
-            svc_records = await svc_result.data()
-            affected_services = [
-                ServiceRef(id=r["id"], name=r["name"] or "", repo=r["repo"] or "")
-                for r in svc_records
-                if r.get("id")
-            ]
+        for e in row.get("edges", []):
+            if e and e.get("from") and e.get("to"):
+                edges.append(EdgeContext(
+                    from_id=e["from"],
+                    to_id=e["to"],
+                    relationship=e["type"],
+                ))
 
     return SubgraphResponse(
         nodes=nodes,
         edges=edges,
         token_estimate=_estimate_tokens(nodes),
-        affected_services=affected_services,
+        query_meta={
+            "keywords": keyword_list,
+            "seed_count": len(all_seed_ids),
+            "pillar_filter": pillar,
+            "dimension_filter": dimension,
+        },
     )
