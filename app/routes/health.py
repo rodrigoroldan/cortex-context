@@ -3,6 +3,8 @@ health.py — Endpoint de health check com verificação do Neo4j.
 """
 from __future__ import annotations
 
+from importlib.metadata import version as pkg_version
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -10,11 +12,13 @@ from app.db.neo4j import get_driver
 
 router = APIRouter(tags=["health"])
 
+_VERSION = pkg_version("cortex-context")
+
 
 class HealthResponse(BaseModel):
     status: str
     neo4j: str
-    version: str = "0.1.0"
+    version: str = _VERSION
 
 
 @router.get("/health", response_model=HealthResponse)
