@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cortex Context — Product Knowledge Graph for AI Agents</title>
+  <meta name="description" content="GraphRAG + Vector RAG for AI coding agents. Give your Copilot deep product context with the I.S.I.R ontology." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#000; --bg-card:#111; --bg-card-hover:#161616;
+      --border:rgba(255,255,255,.08); --border-hover:rgba(255,255,255,.15);
+      --text-primary:#ededed; --text-secondary:#a1a1aa; --text-muted:#52525b;
+      --accent-blue:#2563eb; --accent-purple:#7c3aed; --accent-green:#10b981;
+      --font:'Geist',-apple-system,sans-serif; --mono:'Geist Mono','Fira Code',monospace;
+    }
+    html { scroll-behavior:smooth; }
+    body { font-family:var(--font); background:var(--bg); color:var(--text-primary); line-height:1.6; overflow-x:hidden; }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index:0; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"); }
+    .grid-bg { position:absolute; inset:0; pointer-events:none; background-image:linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px); background-size:72px 72px; mask-image:radial-gradient(ellipse 80% 70% at 50% 0%,black 40%,transparent 100%); }
+
+    /* NAV */
+    nav { position:fixed; top:0; left:0; right:0; z-index:100; display:flex; align-items:center; justify-content:space-between; padding:0 32px; height:64px; background:rgba(0,0,0,.75); backdrop-filter:blur(16px) saturate(180%); border-bottom:1px solid var(--border); }
+    .nav-logo { display:flex; align-items:center; gap:10px; text-decoration:none; color:var(--text-primary); font-weight:600; font-size:15px; letter-spacing:-.02em; }
+    .nav-links { display:flex; align-items:center; gap:28px; }
+    .nav-links a { font-size:14px; color:var(--text-secondary); text-decoration:none; transition:color .15s; }
+    .nav-links a:hover { color:var(--text-primary); }
+    .nav-cta { display:flex; align-items:center; gap:12px; }
+    .btn-ghost { font-size:14px; font-family:var(--font); background:none; border:none; cursor:pointer; color:var(--text-secondary); padding:6px 14px; border-radius:6px; transition:color .15s,background .15s; text-decoration:none; }
+    .btn-ghost:hover { color:var(--text-primary); background:rgba(255,255,255,.05); }
+    .btn-primary { font-size:14px; font-family:var(--font); font-weight:500; background:var(--text-primary); color:#000; border:none; cursor:pointer; padding:7px 16px; border-radius:6px; transition:background .15s,transform .1s; text-decoration:none; }
+    .btn-primary:hover { background:#d4d4d8; transform:translateY(-1px); }
+
+    /* HERO */
+    .hero { position:relative; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:120px 24px 80px; overflow:hidden; }
+    .hero-glow { position:absolute; top:-20%; left:50%; transform:translateX(-50%); width:900px; height:600px; background:radial-gradient(ellipse at top,rgba(37,99,235,.18) 0%,rgba(124,58,237,.10) 40%,transparent 70%); pointer-events:none; }
+    .badge { display:inline-flex; align-items:center; gap:8px; padding:5px 14px 5px 8px; border:1px solid var(--border); border-radius:99px; font-size:12px; font-weight:500; color:var(--text-secondary); background:rgba(255,255,255,.03); margin-bottom:28px; }
+    .badge-dot { width:6px; height:6px; border-radius:50%; background:var(--accent-green); box-shadow:0 0 6px var(--accent-green); animation:pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.5} }
+    .hero-eyebrow { font-size:13px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:14px; }
+    .hero h1 { font-size:clamp(60px,9vw,108px); font-weight:800; letter-spacing:-.05em; line-height:1.0; margin-bottom:16px; }
+    .hero h1 .gradient { background:linear-gradient(135deg,#60a5fa 0%,#a78bfa 50%,#34d399 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .hero-tagline { font-size:clamp(15px,1.8vw,18px); color:var(--text-secondary); max-width:500px; line-height:1.7; margin-bottom:36px; }
+    .hero-actions { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-bottom:60px; }
+    .btn-hero-primary { font-family:var(--font); font-size:15px; font-weight:500; background:var(--text-primary); color:#000; border:none; cursor:pointer; padding:11px 24px; border-radius:8px; text-decoration:none; transition:background .15s,transform .1s; }
+    .btn-hero-primary:hover { background:#d4d4d8; transform:translateY(-2px); }
+    .btn-hero-secondary { font-family:var(--font); font-size:15px; font-weight:500; background:transparent; color:var(--text-primary); border:1px solid var(--border); cursor:pointer; padding:11px 24px; border-radius:8px; text-decoration:none; transition:border-color .15s,background .15s,transform .1s; }
+    .btn-hero-secondary:hover { border-color:var(--border-hover); background:rgba(255,255,255,.03); transform:translateY(-2px); }
+
+    /* CODE PREVIEW */
+    .code-preview { width:100%; max-width:620px; background:#0d0d0d; border:1px solid var(--border); border-radius:12px; overflow:hidden; text-align:left; box-shadow:0 0 0 1px rgba(255,255,255,.04),0 32px 64px rgba(0,0,0,.5); }
+    .code-bar { display:flex; align-items:center; gap:6px; padding:12px 16px; border-bottom:1px solid var(--border); background:#080808; }
+    .code-dot { width:12px; height:12px; border-radius:50%; }
+    .code-dot.red{background:#ff5f57} .code-dot.yellow{background:#febc2e} .code-dot.green{background:#28c840}
+    .code-label { margin-left:8px; font-family:var(--mono); font-size:12px; color:var(--text-muted); }
+    .code-content { padding:20px 24px; font-family:var(--mono); font-size:13px; line-height:1.8; overflow-x:auto; }
+    .c-comment{color:#52525b} .c-key{color:#60a5fa} .c-str{color:#a3e635} .c-punct{color:#71717a} .c-num{color:#fb923c} .c-tag{color:#c084fc}
+
+    /* COMMON */
+    section { position:relative; z-index:1; }
+    .section-inner { max-width:1080px; margin:0 auto; padding:88px 24px; }
+    .section-label { font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-blue); margin-bottom:14px; }
+    .section-title { font-size:clamp(26px,3.5vw,42px); font-weight:800; letter-spacing:-.03em; line-height:1.1; margin-bottom:14px; }
+    .section-sub { font-size:16px; color:var(--text-secondary); max-width:500px; line-height:1.7; margin-bottom:48px; }
+    .sep { height:1px; background:linear-gradient(90deg,transparent,var(--border) 30%,var(--border) 70%,transparent); max-width:1080px; margin:0 auto; }
+
+    /* STATS */
+    .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+    @media(max-width:640px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
+    .stat-item { background:var(--bg); padding:28px 24px; text-align:center; }
+    .stat-num { font-size:34px; font-weight:800; letter-spacing:-.04em; background:linear-gradient(135deg,var(--text-primary),var(--text-secondary)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .stat-label { font-size:12px; color:var(--text-muted); margin-top:4px; }
+
+    /* ISIR */
+    .isir-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:16px; overflow:hidden; }
+    .isir-card { background:var(--bg-card); padding:28px 24px; transition:background .2s; }
+    .isir-card:hover { background:var(--bg-card-hover); }
+    .isir-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; margin-bottom:14px; }
+    .isir-card:nth-child(1) .isir-icon{background:rgba(37,99,235,.15)}
+    .isir-card:nth-child(2) .isir-icon{background:rgba(124,58,237,.15)}
+    .isir-card:nth-child(3) .isir-icon{background:rgba(16,185,129,.15)}
+    .isir-card:nth-child(4) .isir-icon{background:rgba(249,115,22,.15)}
+    .isir-pillar { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--text-muted); margin-bottom:5px; }
+    .isir-name { font-size:18px; font-weight:700; letter-spacing:-.02em; margin-bottom:8px; }
+    .isir-question { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px; }
+    .isir-desc { font-size:13px; color:var(--text-muted); line-height:1.6; }
+    .isir-examples { display:flex; flex-wrap:wrap; gap:5px; margin-top:14px; }
+    .isir-tag { font-size:11px; font-family:var(--mono); padding:2px 7px; border-radius:4px; background:rgba(255,255,255,.05); border:1px solid var(--border); color:var(--text-muted); }
+
+    /* FEATURES */
+    .features-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:16px; overflow:hidden; }
+    .feature-card { background:var(--bg-card); padding:32px 28px; transition:background .2s; }
+    .feature-card:hover { background:var(--bg-card-hover); }
+    .feature-icon { width:40px; height:40px; border-radius:10px; background:rgba(255,255,255,.04); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:18px; margin-bottom:16px; }
+    .feature-title { font-size:16px; font-weight:700; letter-spacing:-.02em; margin-bottom:8px; }
+    .feature-desc { font-size:13px; color:var(--text-muted); line-height:1.7; }
+
+    /* CLI */
+    .cli-grid { display:grid; grid-template-columns:1fr 1fr; gap:32px; align-items:start; }
+    @media(max-width:768px){.cli-grid{grid-template-columns:1fr}}
+    .cli-commands { display:flex; flex-direction:column; gap:8px; }
+    .cli-row { display:flex; flex-direction:column; gap:6px; padding:16px 18px; background:var(--bg-card); border:1px solid var(--border); border-radius:10px; transition:border-color .15s,background .15s; }
+    .cli-row:hover { border-color:var(--border-hover); background:var(--bg-card-hover); }
+    .cli-cmd { font-family:var(--mono); font-size:12.5px; color:var(--accent-green); }
+    .cli-desc { font-size:13px; color:var(--text-muted); line-height:1.55; }
+
+    /* QUERY CARD */
+    .query-card { background:#080808; border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+    .query-header { padding:13px 20px; border-bottom:1px solid var(--border); font-size:12px; font-weight:600; color:var(--text-muted); letter-spacing:.06em; text-transform:uppercase; display:flex; align-items:center; gap:8px; }
+    .query-body { padding:20px; font-family:var(--mono); font-size:13px; line-height:1.75; }
+
+    /* INTEGRATIONS */
+    .integrations-row { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; }
+    .integration-chip { display:flex; align-items:center; gap:8px; padding:9px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; font-size:13px; font-weight:500; color:var(--text-secondary); transition:border-color .15s,color .15s,background .15s; }
+    .integration-chip:hover { border-color:var(--border-hover); color:var(--text-primary); background:var(--bg-card-hover); }
+    .integration-chip span { font-size:16px; }
+
+    /* CTA */
+    .cta-section { text-align:center; position:relative; overflow:hidden; }
+    .cta-glow { position:absolute; bottom:-50%; left:50%; transform:translateX(-50%); width:700px; height:400px; background:radial-gradient(ellipse at bottom,rgba(124,58,237,.20) 0%,transparent 70%); pointer-events:none; }
+    .cta-title { font-size:clamp(32px,5vw,58px); font-weight:800; letter-spacing:-.04em; line-height:1.05; margin-bottom:16px; }
+    .cta-sub { font-size:17px; color:var(--text-secondary); margin-bottom:36px; }
+    .cta-actions { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+
+    /* FOOTER */
+    footer { border-top:1px solid var(--border); padding:36px 32px; }
+    .footer-inner { max-width:1080px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+    .footer-logo { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--text-secondary); }
+    .footer-links { display:flex; gap:24px; }
+    .footer-links a { font-size:13px; color:var(--text-muted); text-decoration:none; transition:color .15s; }
+    .footer-links a:hover { color:var(--text-secondary); }
+    .footer-copy { font-size:13px; color:var(--text-muted); }
+
+    .btn-disabled { opacity:.4; cursor:not-allowed !important; pointer-events:none; filter:grayscale(.4); }
+    .soon-badge { display:inline-flex; align-items:center; font-size:10px; font-weight:600; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.16); border-radius:4px; padding:1px 6px; margin-left:6px; letter-spacing:.05em; text-transform:uppercase; vertical-align:middle; }
+    .footer-links .soon-text { font-size:13px; color:var(--text-muted); opacity:.4; cursor:not-allowed; }
+
+    @media(max-width:600px){nav{padding:0 16px}.nav-links{display:none}.section-inner{padding:64px 20px}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    .fade-up{animation:fadeUp .65s ease forwards}
+    .d1{animation-delay:.05s;opacity:0} .d2{animation-delay:.15s;opacity:0} .d3{animation-delay:.28s;opacity:0} .d4{animation-delay:.42s;opacity:0}
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">
+    <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+      <circle cx="11" cy="11" r="10" stroke="white" stroke-width="1.5" opacity="0.3"/>
+      <circle cx="11" cy="11" r="4" fill="white" opacity="0.9"/>
+      <line x1="11" y1="1" x2="11" y2="6" stroke="white" stroke-width="1.5" opacity="0.5"/>
+      <line x1="11" y1="16" x2="11" y2="21" stroke="white" stroke-width="1.5" opacity="0.5"/>
+      <line x1="1" y1="11" x2="6" y2="11" stroke="white" stroke-width="1.5" opacity="0.5"/>
+      <line x1="16" y1="11" x2="21" y2="11" stroke="white" stroke-width="1.5" opacity="0.5"/>
+    </svg>
+    Cortex Context
+  </a>
+  <div class="nav-links">
+    <a href="#ontology">Ontology</a>
+    <a href="#cli">CLI</a>
+    <a href="#features">Features</a>
+    <a href="https://github.com/rodrigoroldan/cortex-role-organizado">Docs</a>
+  </div>
+  <div class="nav-cta">
+    <span class="btn-ghost btn-disabled" title="Repositório privado — em breve público">GitHub <span class="soon-badge">em breve</span></span>
+    <a href="#get-started" class="btn-primary">Get started →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="grid-bg"></div>
+  <div class="hero-glow"></div>
+
+  <div class="badge fade-up">
+    <span class="badge-dot"></span>
+    v3.0 &middot; GraphRAG + Vector RAG &middot; MCP-native
+  </div>
+
+  <p class="hero-eyebrow fade-up d1">Product Knowledge Graph for AI Agents</p>
+  <h1 class="fade-up d2"><span class="gradient">Cortex Context</span></h1>
+  <p class="hero-tagline fade-up d3">
+    Give GitHub Copilot and any AI coding agent deep, structured understanding of your product — specs, services, decisions and workflows — in a queryable graph.
+  </p>
+
+  <div class="hero-actions fade-up d4">
+    <a href="#get-started" class="btn-hero-primary">Start in 5 minutes</a>
+    <a href="#ontology" class="btn-hero-secondary">See how it works</a>
+  </div>
+
+  <div class="code-preview fade-up d4">
+    <div class="code-bar">
+      <span class="code-dot red"></span><span class="code-dot yellow"></span><span class="code-dot green"></span>
+      <span class="code-label">cortex.config.yaml</span>
+    </div>
+    <div class="code-content">
+<span class="c-comment"># Configure your knowledge graph in minutes</span>
+<span class="c-key">cortex_version</span><span class="c-punct">:</span> <span class="c-str">"3.0.0"</span>
+
+<span class="c-key">active_dimensions</span><span class="c-punct">:</span>
+  <span class="c-punct">-</span> <span class="c-str">spec</span>      <span class="c-comment"># Intent     — why you build it</span>
+  <span class="c-punct">-</span> <span class="c-str">service</span>   <span class="c-comment"># System     — how it's structured</span>
+  <span class="c-punct">-</span> <span class="c-str">workflow</span>  <span class="c-comment"># Implementation — what runs it</span>
+  <span class="c-punct">-</span> <span class="c-str">adr</span>       <span class="c-comment"># System     — why decisions were made</span>
+
+<span class="c-key">filesystem</span><span class="c-punct">:</span>
+  <span class="c-key">workspace_root</span><span class="c-punct">:</span> <span class="c-str">"/workspace"</span>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="sep"></div>
+<div class="section-inner" style="padding-top:56px;padding-bottom:56px;">
+  <div class="stats-grid">
+    <div class="stat-item"><div class="stat-num">4</div><div class="stat-label">Ontology pillars</div></div>
+    <div class="stat-item"><div class="stat-num">&lt;5min</div><div class="stat-label">Time to first query</div></div>
+    <div class="stat-item"><div class="stat-num">&infin;</div><div class="stat-label">Custom dimensions</div></div>
+    <div class="stat-item"><div class="stat-num">100%</div><div class="stat-label">Product-agnostic</div></div>
+  </div>
+</div>
+<div class="sep"></div>
+
+<!-- ONTOLOGY -->
+<section id="ontology">
+  <div class="section-inner">
+    <div class="section-label">I.S.I.R Ontology</div>
+    <h2 class="section-title">Four pillars. Complete context.</h2>
+    <p class="section-sub">Every piece of product knowledge maps to one of four universal concepts, giving AI agents a structured map of your entire codebase.</p>
+    <div class="isir-grid">
+      <div class="isir-card">
+        <div class="isir-icon">🎯</div>
+        <div class="isir-pillar">Pillar 1</div>
+        <div class="isir-name" style="color:#60a5fa;">Intent</div>
+        <div class="isir-question">The "Why"</div>
+        <div class="isir-desc">Specs, requirements and user stories that explain the purpose behind every feature.</div>
+        <div class="isir-examples"><span class="isir-tag">:Spec</span><span class="isir-tag">:UserStory</span><span class="isir-tag">:Epic</span></div>
+      </div>
+      <div class="isir-card">
+        <div class="isir-icon">🏗️</div>
+        <div class="isir-pillar">Pillar 2</div>
+        <div class="isir-name" style="color:#a78bfa;">System</div>
+        <div class="isir-question">The "How"</div>
+        <div class="isir-desc">Services, ADRs and APIs that form the structural skeleton of your product.</div>
+        <div class="isir-examples"><span class="isir-tag">:Service</span><span class="isir-tag">:ADR</span><span class="isir-tag">:API</span></div>
+      </div>
+      <div class="isir-card">
+        <div class="isir-icon">⚙️</div>
+        <div class="isir-pillar">Pillar 3</div>
+        <div class="isir-name" style="color:#34d399;">Implementation</div>
+        <div class="isir-question">The "What"</div>
+        <div class="isir-desc">Modules, workflows and components — the concrete building blocks that make it run.</div>
+        <div class="isir-examples"><span class="isir-tag">:Workflow</span><span class="isir-tag">:Module</span><span class="isir-tag">:Component</span></div>
+      </div>
+      <div class="isir-card">
+        <div class="isir-icon">📡</div>
+        <div class="isir-pillar">Pillar 4</div>
+        <div class="isir-name" style="color:#fb923c;">Runtime</div>
+        <div class="isir-question">The "Real world"</div>
+        <div class="isir-desc">Alerts, deployments and incidents that ground AI responses in what's actually happening.</div>
+        <div class="isir-examples"><span class="isir-tag">:Alert</span><span class="isir-tag">:Deployment</span><span class="isir-tag">:Incident</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- CLI -->
+<section id="cli">
+  <div class="section-inner">
+    <div class="section-label">CLI</div>
+    <h2 class="section-title">cortex-context — your terminal companion</h2>
+    <p class="section-sub">A lightweight CLI to ingest, query and manage your knowledge graph without leaving the terminal.</p>
+    <div class="cli-grid">
+      <div class="cli-commands">
+        <div class="cli-row">
+          <span class="cli-cmd">cortex-context ingest</span>
+          <span class="cli-desc">Ingests all active dimensions into Neo4j. Idempotent — safe to re-run anytime.</span>
+        </div>
+        <div class="cli-row">
+          <span class="cli-cmd">cortex-context ingest --dim spec</span>
+          <span class="cli-desc">Ingests only the <em>spec</em> dimension. Fast incremental updates after writing new specs.</span>
+        </div>
+        <div class="cli-row">
+          <span class="cli-cmd">cortex-context query "payments"</span>
+          <span class="cli-desc">Full-text cross-dimension search with 1-hop graph expansion. Returns matched nodes + neighbors.</span>
+        </div>
+        <div class="cli-row">
+          <span class="cli-cmd">cortex-context doctor</span>
+          <span class="cli-desc">Health check — validates config, Neo4j connectivity, node counts and embedding provider.</span>
+        </div>
+        <div class="cli-row">
+          <span class="cli-cmd">cortex-context status</span>
+          <span class="cli-desc">Graph stats: node count per dimension, last ingest timestamp and API health.</span>
+        </div>
+      </div>
+      <div class="query-card">
+        <div class="query-header"><span>⚡</span> Example output</div>
+        <div class="query-body">
+<span class="c-punct">$</span> <span class="c-key">cortex-context</span> <span class="c-str">query "payment expiration"</span>
+
+<span class="c-comment">✓ 3 nodes matched (2 hops)</span>
+
+<span class="c-tag">spec-084</span>   <span class="c-str">Payment Expiration Flow</span>
+          <span class="c-comment">Intent · score 0.94</span>
+
+<span class="c-tag">workflow-payment-expiration</span>
+          <span class="c-str">PaymentExpirationWorkflow</span>
+          <span class="c-comment">Implementation · neighbor</span>
+
+<span class="c-tag">adr-0007</span>   <span class="c-str">Use Temporal.io for async jobs</span>
+          <span class="c-comment">System · neighbor</span>
+
+<span class="c-punct">$</span> <span class="c-key">cortex-context</span> <span class="c-str">doctor</span>
+
+<span class="c-comment">✓ Config valid       (cortex.config.yaml)
+✓ Neo4j reachable    (bolt://localhost:7687)
+✓ Nodes in graph     122 specs · 8 services
+✓ Embedder           local (sentence-transformers)
+✓ MCP server         running on :3001</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Built for the AI-native team</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🕸️</div>
+        <div class="feature-title">Graph-first exploration</div>
+        <div class="feature-desc">FTS hits trigger 1–2 hop expansions — your agent sees a spec plus everything it impacts: services, decisions, workflows.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔬</div>
+        <div class="feature-title">Hybrid RAG</div>
+        <div class="feature-desc">Combine full-text precision with semantic similarity. Built-in local embeddings or OpenAI for natural-language queries.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔌</div>
+        <div class="feature-title">MCP-native</div>
+        <div class="feature-desc">Ships with a Model Context Protocol server. GitHub Copilot, Claude Desktop and any MCP agent connects out of the box.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧩</div>
+        <div class="feature-title">Plugin dimensions</div>
+        <div class="feature-desc">Add GitHub Issues, Confluence or Jira as a single YAML + Python file. No core code changes required.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <div class="feature-title">Fully local</div>
+        <div class="feature-desc">Everything runs on your machine or private server. Your source code never leaves your infrastructure.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📈</div>
+        <div class="feature-title">Impact analysis</div>
+        <div class="feature-desc">Ask "what services are affected by spec-070?" and get a graph-traversed answer instantly.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- INTEGRATIONS -->
+<section id="integrations">
+  <div class="section-inner" style="text-align:center;">
+    <div class="section-label" style="text-align:center;">Integrations</div>
+    <h2 class="section-title" style="text-align:center;margin:0 auto 12px;">Works with your stack</h2>
+    <p class="section-sub" style="margin:0 auto 44px;">Product-agnostic and open. Plug it into the tools your team already uses.</p>
+    <div class="integrations-row">
+      <div class="integration-chip"><span>🤖</span> GitHub Copilot</div>
+      <div class="integration-chip"><span>🧠</span> Claude Desktop</div>
+      <div class="integration-chip"><span>⚡</span> VS Code</div>
+      <div class="integration-chip"><span>🕸️</span> Neo4j</div>
+      <div class="integration-chip"><span>🐍</span> FastAPI</div>
+      <div class="integration-chip"><span>🐳</span> Docker</div>
+      <div class="integration-chip"><span>🐙</span> GitHub</div>
+      <div class="integration-chip"><span>📄</span> Markdown / YAML</div>
+      <div class="integration-chip"><span>🔷</span> OpenAI Embeddings</div>
+      <div class="integration-chip"><span>📊</span> Any MCP client</div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- GET STARTED -->
+<section id="get-started">
+  <div class="section-inner">
+    <div class="section-label">Quick Start</div>
+    <h2 class="section-title">Up in 5 minutes</h2>
+    <p class="section-sub">Three commands to a working knowledge graph.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:48px;">
+      <div class="query-card">
+        <div class="query-header"><span style="background:#2563eb;color:#fff;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;">1</span>Clone &amp; configure</div>
+        <div class="query-body">
+<span class="c-tag">git</span> <span class="c-key">clone</span> <span class="c-str">cortex-context</span>
+<span class="c-tag">cp</span> .env.example .env
+<span class="c-comment"># Set WORKSPACE_ROOT to your repo</span>
+        </div>
+      </div>
+      <div class="query-card">
+        <div class="query-header"><span style="background:#7c3aed;color:#fff;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;">2</span>Start the graph</div>
+        <div class="query-body">
+<span class="c-tag">docker</span> <span class="c-key">compose</span> <span class="c-str">up -d</span>
+<span class="c-comment"># Starts Neo4j + Cortex API</span>
+        </div>
+      </div>
+      <div class="query-card">
+        <div class="query-header"><span style="background:#10b981;color:#fff;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;">3</span>Ingest &amp; query</div>
+        <div class="query-body">
+<span class="c-tag">cortex-context</span> <span class="c-key">ingest</span>
+<span class="c-tag">cortex-context</span> <span class="c-key">query</span> <span class="c-str">"payments"</span>
+<span class="c-comment"># ✅ Your agent has context</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="sep"></div>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="cta-glow"></div>
+  <div class="section-inner">
+    <h2 class="cta-title">Give your AI agent<br/>a brain, not a blinder.</h2>
+    <p class="cta-sub">Stop pasting README files into chat. Build a living knowledge graph.</p>
+    <div class="cta-actions">
+      <span class="btn-hero-primary btn-disabled" title="Repositório privado — em breve público">View on GitHub <span class="soon-badge">🔒 em breve</span></span>
+      <a href="#ontology" class="btn-hero-secondary">Explore the docs</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-logo">
+      <svg width="16" height="16" viewBox="0 0 22 22" fill="none">
+        <circle cx="11" cy="11" r="10" stroke="white" stroke-width="1.5" opacity="0.4"/>
+        <circle cx="11" cy="11" r="4" fill="white" opacity="0.7"/>
+        <line x1="11" y1="1" x2="11" y2="6" stroke="white" stroke-width="1.5" opacity="0.4"/>
+        <line x1="11" y1="16" x2="11" y2="21" stroke="white" stroke-width="1.5" opacity="0.4"/>
+        <line x1="1" y1="11" x2="6" y2="11" stroke="white" stroke-width="1.5" opacity="0.4"/>
+        <line x1="16" y1="11" x2="21" y2="11" stroke="white" stroke-width="1.5" opacity="0.4"/>
+      </svg>
+      Cortex Context
+    </div>
+    <div class="footer-links">
+      <a href="#ontology">Docs</a>
+      <span class="soon-text" title="Em breve">GitHub</span>
+      <a href="#features">Features</a>
+      <a href="#cli">CLI</a>
+    </div>
+    <div class="footer-copy">&copy; 2026 Cortex Context &middot; Open Source</div>
+  </div>
+</footer>
+
+</body>
+</html>
