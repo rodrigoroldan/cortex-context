@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
@@ -57,6 +57,34 @@ def create_app() -> FastAPI:
     app.include_router(semantic.router, prefix="/api/v1")
     app.include_router(nodes.router, prefix="/api/v1")
     app.include_router(ingest.router, prefix="/api/v1")
+
+    # ── Prometheus /metrics ────────────────────────────────────────────────────
+    # Opcional: habilitado quando prometheus-client estiver instalado.
+    # Para habilitar: pip install prometheus-client
+    # Em produção, está sempre habilitado (instalado via pyproject.toml extras).
+    try:
+        from prometheus_client import (
+            CONTENT_TYPE_LATEST,
+            CollectorRegistry,
+            generate_latest,
+            multiprocess,
+        )
+
+        @app.get("/metrics", include_in_schema=False)
+        async def metrics():
+            """Prometheus metrics endpoint. Sem autenticação (scrape interno apenas)."""
+            import os
+            if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+                registry = CollectorRegistry()
+                multiprocess.MultiProcessCollector(registry)
+                data = generate_latest(registry)
+            else:
+                data = generate_latest()
+            return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+    except ImportError:
+        # prometheus-client não instalado — endpoint /metrics não disponível
+        pass
 
     return app
 

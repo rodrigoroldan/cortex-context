@@ -32,6 +32,7 @@ from app.config import get_settings
 from app.core.dimension_loader import DimensionConfig, load_dimensions
 from app.core.graph_builder import ingest_edges, ingest_nodes
 from app.core.parser_registry import get_parser
+from app.core.parsers.manifest import IngestManifest, ManifestIngestResponse
 from app.db.neo4j import apply_index, get_driver
 
 logger = logging.getLogger(__name__)
@@ -275,3 +276,63 @@ async def ingest_all(
         total_edges=total_edges,
         results=results,
     )
+
+
+# ─── Manifest endpoint ───────────────────────────────────────────────────────
+
+
+@router.post(
+    "/ingest/manifest",
+    response_model=ManifestIngestResponse,
+    summary="Ingesta via manifesto pré-computado (CLI agent)",
+    description=(
+        "Aceita um IngestManifest JSON com nós e arestas pré-computados pelo "
+        "Cortex Ingestion Agent CLI (gerado via git diff). "
+        "O servidor persiste os dados diretamente, sem necessidade de parsear arquivos. "
+        "Propriedades bitemporais (ingested_at, valid_from, commit_sha) são adicionadas automaticamente."
+    ),
+)
+async def ingest_manifest(
+    manifest: IngestManifest,
+    _token: str = Depends(_verify_token),
+):
+    from app.core.parsers.base import EdgeData, NodeData
+
+    driver = get_driver()
+
+    # Converter ManifestNodes → NodeData
+    nodes = [
+        NodeData(
+            node_labels=mn.node_labels,
+            node_id=mn.node_id,
+            properties={"id": mn.node_id, **mn.properties},
+        )
+        for mn in manifest.nodes
+    ]
+
+    # Converter ManifestEdges → EdgeData
+    edges = [
+        EdgeData(
+            from_id=me.from_id,
+            to_id=me.to_id,
+            relationship=me.relationship,
+            properties=me.properties,
+        )
+        for me in manifest.edges
+    ]
+
+    nodes_ok = await ingest_nodes(driver, nodes, commit_sha=manifest.commit_sha)
+    edges_ok = await ingest_edges(driver, edges)
+
+    return ManifestIngestResponse(
+        source=manifest.source,
+        commit_sha=manifest.commit_sha,
+        nodes_upserted=nodes_ok,
+        edges_upserted=edges_ok,
+        message=(
+            f"Manifesto '{manifest.source}' ingerido: "
+            f"{nodes_ok} nós, {edges_ok} arestas"
+            + (f" (commit: {manifest.commit_sha[:8]})" if manifest.commit_sha else "")
+        ),
+    )
+

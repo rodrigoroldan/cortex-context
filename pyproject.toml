@@ -28,6 +28,10 @@ embeddings-local = ["sentence-transformers>=2.7.0"]
 # Embeddings via OpenAI API (1536 dims — requer OPENAI_API_KEY)
 # Instalar com: pip install "cortex-role-organizado[embeddings-openai]"
 embeddings-openai = ["openai>=1.30.0"]
+# Prometheus metrics endpoint (/metrics)
+# Instalar com: pip install "cortex-role-organizado[metrics]"
+# Em produção, instalar junto com o pacote base.
+metrics = ["prometheus-client>=0.20.0"]
 
 [project.scripts]
 cortex-ingest = "cortex.ingestor.cli:app"
