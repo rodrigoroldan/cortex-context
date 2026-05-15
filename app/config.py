@@ -32,6 +32,21 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
+    # ── Vector RAG (Embeddings) ────────────────────────────────────────────────
+    # Provider de embeddings para Vector RAG.
+    # Opções: "none" (default, FTS-only), "openai", "local"
+    # "none"   → sem embeddings. Cortex funciona com FTS puro.
+    # "openai" → OpenAI text-embedding-3-small. Requer OPENAI_API_KEY.
+    # "local"  → sentence-transformers all-MiniLM-L6-v2. Offline, sem GPU.
+    cortex_embedding_provider: str = "none"
+
+    # API Key do OpenAI (obrigatório quando provider="openai")
+    openai_api_key: str = ""
+
+    # Modelo local de embeddings (usado quando provider="local")
+    # Padrão: all-MiniLM-L6-v2 (384 dims, ~22MB, rápido e preciso)
+    cortex_embedding_model: str = "all-MiniLM-L6-v2"
+
 
 @lru_cache
 def get_settings() -> Settings:

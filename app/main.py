@@ -6,14 +6,30 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.db.neo4j import close_driver, init_driver
-from app.routes import health, ingest, nodes, query
+from app.core.embedder import init_embedder
+from app.db.neo4j import apply_vector_index, close_driver, init_driver
+from app.routes import health, ingest, nodes, query, semantic
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     await init_driver(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+
+    # ── Inicializar embedder (Vector RAG) ──────────────────────────────────────
+    # Se provider="none" (default), o embedder fica desabilitado e o sistema
+    # funciona em modo FTS-only. Nenhuma dep extra é necessária.
+    if settings.cortex_embedding_provider != "none":
+        init_embedder(
+            provider=settings.cortex_embedding_provider,
+            api_key=settings.openai_api_key,
+            model_name=settings.cortex_embedding_model,
+        )
+        # Criar índice vetorial no Neo4j com as dimensões corretas para o provider
+        from app.core.embedder import get_embedding_dimensions
+        dims = get_embedding_dimensions(settings.cortex_embedding_provider)
+        await apply_vector_index(dimensions=dims)
+
     yield
     await close_driver()
 
@@ -23,8 +39,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Cortex — Product Knowledge Graph",
-        description="GraphRAG service para contextualização de specs do Rolê Organizado",
-        version="0.1.0",
+        description="GraphRAG service para contextualização de produto — agnóstico ao domínio",
+        version="0.2.0",
         lifespan=lifespan,
         docs_url="/docs" if settings.app_env != "production" else None,
     )
@@ -38,6 +54,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(query.router, prefix="/api/v1")
+    app.include_router(semantic.router, prefix="/api/v1")
     app.include_router(nodes.router, prefix="/api/v1")
     app.include_router(ingest.router, prefix="/api/v1")
 

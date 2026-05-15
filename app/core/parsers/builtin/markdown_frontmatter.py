@@ -7,6 +7,9 @@ Estratégia de extração:
   3. Extrai a primeira frase/parágrafo como summary.
   4. Detecta referências cruzadas a outros nós via padrões configuráveis.
   5. Infere labels a partir do slug do diretório e do conteúdo.
+  6. (Opcional) Produz nós :DocumentChunk para Vector RAG quando
+     CORTEX_EMBEDDING_PROVIDER != "none". Chunks são linkados ao nó pai
+     via edge CHUNK_OF.
 
 Compatível com qualquer formato de spec/doc — não depende de jargões do produto.
 
@@ -24,7 +27,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from app.core.parsers.base import BaseCortexExtractor, EdgeData, NodeData, ParseResult
+from app.core.chunker import chunk_markdown
+from app.core.embedder import is_embedder_enabled
+from app.core.parsers.base import BaseCortexExtractor, EdgeData, NodeData, ParseResult, make_chunk_node
 
 if TYPE_CHECKING:
     from app.core.dimension_loader import DimensionConfig
@@ -190,4 +195,30 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
         # Detectar referências cruzadas
         edges = _detect_cross_refs(content, node_id, dimension_config.dimension)
 
-        return ParseResult(nodes=[node], edges=edges)
+        # ── Vector RAG: produzir DocumentChunk nodes ──────────────────────────
+        # Ativado apenas quando o embedder está habilitado (provider != "none").
+        # Os chunks são gerados a partir do body sem frontmatter.
+        # Os embeddings são preenchidos mais tarde pelo pipeline de ingestão.
+        chunk_nodes: list[NodeData] = []
+        chunk_edges: list[EdgeData] = []
+
+        if is_embedder_enabled() and body.strip():
+            text_chunks = chunk_markdown(body, chunk_size=600, overlap=100)
+            for idx, chunk_text in enumerate(text_chunks):
+                chunk_node = make_chunk_node(
+                    parent_id=node_id,
+                    chunk_index=idx,
+                    content=chunk_text,
+                    pillar=dimension_config.pillar,
+                )
+                chunk_nodes.append(chunk_node)
+                chunk_edges.append(EdgeData(
+                    from_id=chunk_node.node_id,
+                    to_id=node_id,
+                    relationship="CHUNK_OF",
+                ))
+
+        return ParseResult(
+            nodes=[node] + chunk_nodes,
+            edges=edges + chunk_edges,
+        )

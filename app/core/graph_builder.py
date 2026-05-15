@@ -107,3 +107,67 @@ async def create_constraint_if_not_exists(driver: AsyncDriver, cypher: str) -> N
     except Exception as e:
         logger.warning("Erro ao criar constraint/índice: %s | Cypher: %s", e, cypher)
 
+
+async def upsert_chunk(driver: AsyncDriver, chunk: NodeData) -> None:
+    """
+    Persiste um nó DocumentChunk com suporte a embeddings (propriedade float[]).
+
+    Usa MERGE na label DocumentChunk + id. O embedding é atualizado via SET
+    apenas se presente nas properties, evitando sobrescrever vetores existentes
+    com None.
+
+    Args:
+        driver: AsyncDriver Neo4j.
+        chunk:  NodeData com primary_label="DocumentChunk".
+    """
+    props_without_embedding = {
+        k: v for k, v in chunk.properties.items() if k != "embedding"
+    }
+    has_embedding = "embedding" in chunk.properties
+
+    extra_labels = [lbl for lbl in chunk.node_labels if lbl != "DocumentChunk"]
+    set_labels_clause = f"SET n:{':'.join(extra_labels)}" if extra_labels else ""
+
+    if has_embedding:
+        cypher = f"""
+        MERGE (n:DocumentChunk {{id: $id}})
+        {set_labels_clause}
+        SET n += $props
+        SET n.embedding = $embedding
+        """
+        async with driver.session() as session:
+            await session.run(
+                cypher,
+                id=chunk.node_id,
+                props=props_without_embedding,
+                embedding=chunk.properties["embedding"],
+            )
+    else:
+        cypher = f"""
+        MERGE (n:DocumentChunk {{id: $id}})
+        {set_labels_clause}
+        SET n += $props
+        """
+        async with driver.session() as session:
+            await session.run(
+                cypher,
+                id=chunk.node_id,
+                props=props_without_embedding,
+            )
+
+
+async def ingest_chunks(driver: AsyncDriver, chunks: list[NodeData]) -> int:
+    """Upserta uma lista de DocumentChunk nodes. Retorna o número processado com sucesso."""
+    count = 0
+    for chunk in chunks:
+        try:
+            await upsert_chunk(driver, chunk)
+            count += 1
+        except Exception as e:
+            logger.error(
+                "Erro ao upsert chunk %s: %s",
+                chunk.node_id,
+                e,
+            )
+    return count
+
