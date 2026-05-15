@@ -3,7 +3,7 @@ health.py — Endpoint de health check com verificação do Neo4j.
 """
 from __future__ import annotations
 
-from importlib.metadata import version as pkg_version
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -12,7 +12,10 @@ from app.db.neo4j import get_driver
 
 router = APIRouter(tags=["health"])
 
-_VERSION = pkg_version("cortex-context")
+try:
+    _VERSION = pkg_version("cortex-role-organizado")
+except PackageNotFoundError:
+    _VERSION = "unknown"
 
 
 class HealthResponse(BaseModel):
