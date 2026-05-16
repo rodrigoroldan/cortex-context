@@ -34,6 +34,55 @@ from app.core.parsers.base import BaseCortexExtractor, EdgeData, NodeData, Parse
 if TYPE_CHECKING:
     from app.core.dimension_loader import DimensionConfig
 
+# ─── Padrões de status inferidos do corpo ────────────────────────────────────
+# Ordem importa: mais específico primeiro. Ex: "deprecated" antes de "completed".
+_STATUS_BODY_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("deprecated", re.compile(r"DEPRECATED|depreciada?|descontinuada?", re.IGNORECASE)),
+    ("completed",  re.compile(r"\u2705|100\s*%|IMPLEMENTATION\s+COMPLETE|Completa\b|\bCOMPLETE\b|\bdone\b|\bconclu[íi]da?", re.IGNORECASE)),
+    ("in-progress", re.compile(r"\U0001f6a7|em\s+andamento|in[\s\-]progress", re.IGNORECASE)),
+    ("planned",    re.compile(r"\U0001f4cb|[Pp]lanejamento|[Pp]lanejada?|\bplanned\b|[Pp]lanning", re.IGNORECASE)),
+    ("todo",       re.compile(r"\u2b1c|\bbacklog\b|a\s+fazer|\bto[\s\-]do\b", re.IGNORECASE)),
+]
+
+# Padrão para extração de repos do corpo markdown
+# Detecta: "repos: [a, b]" (YAML inline) ou "**Repos**: a, b" (markdown bold)
+_REPOS_BODY_PATTERN = re.compile(
+    r"^\s*repos?\s*:\s*\[([^\]]+)\]"       # YAML style: repos: [a, b]
+    r"|\*{0,2}[Rr]epos?\*{0,2}\s*:\s*([^\n]+)",  # Markdown: **Repos**: a, b
+    re.MULTILINE,
+)
+
+
+def _infer_status_from_body(body: str) -> str | None:
+    """
+    Infere o status a partir do corpo do markdown quando ausente no frontmatter.
+    Varre os primeiros 600 chars (cabeçalho/resumo onde o status costuma aparecer).
+    """
+    snippet = body[:600]
+    for status_val, pattern in _STATUS_BODY_PATTERNS:
+        if pattern.search(snippet):
+            return status_val
+    return None
+
+
+def _extract_repos_from_body(body: str) -> list[str]:
+    """
+    Extrai lista de repos mencionados no corpo do markdown.
+    Detecta padrões YAML inline (repos: [a, b]) e markdown bold (**Repos**: a, b).
+    Escaneia os primeiros 1500 chars para cobrir cabeçalhos e tabelas de metadados.
+    """
+    repos: list[str] = []
+    for match in _REPOS_BODY_PATTERN.finditer(body[:1500]):
+        raw = match.group(1) or match.group(2) or ""
+        for item in raw.split(","):
+            clean = item.strip().strip("'\"` ").strip()
+            if clean and not clean.startswith("#"):
+                repos.append(clean)
+    # Deduplica preservando ordem
+    seen: set[str] = set()
+    return [r for r in repos if r not in seen and not seen.add(r)]  # type: ignore[func-returns-value]
+
+
 # Padrões de referências cruzadas detectados no texto
 # Formato: [relationship_type, regex]
 _CROSS_REF_PATTERNS: list[tuple[str, re.Pattern]] = [
@@ -161,8 +210,17 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
         extra_labels = frontmatter.get("labels", [])
         all_labels = list(dict.fromkeys(slug_labels + extra_labels))
 
-        # Status
-        status = frontmatter.get("status", "unknown")
+        # Status — frontmatter tem prioridade; fallback: inferência do corpo
+        raw_status = frontmatter.get("status")
+        if raw_status and str(raw_status).lower() not in ("", "unknown"):
+            status = str(raw_status)
+        else:
+            status = _infer_status_from_body(body) or "unknown"
+
+        # Repos — frontmatter tem prioridade; fallback: extração do corpo
+        repos: list[str] = frontmatter.get("repos", [])
+        if not repos:
+            repos = _extract_repos_from_body(body)
 
         # Propriedades base
         properties: dict = {
@@ -177,6 +235,11 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
             # Número sequencial (se houver slug numerado)
             **({"number": int(match.group(1))} if match else {}),
         }
+
+        # Adiciona repos se encontrado
+        if repos:
+            properties["repos"] = repos
+            properties["repos_str"] = " ".join(repos)
 
         # Mesclar campos extras do frontmatter (não sobreescreve campos base)
         for k, v in frontmatter.items():

@@ -165,6 +165,9 @@ async def query_context(
                     node_labels: list[str] = r.get("labels") or []
                     if not nid:
                         continue
+                    # Excluir DocumentChunk nodes — eles poluem o output e não são seeds válidos
+                    if "__chunk_" in nid:
+                        continue
                     # Aplicar filtros opcionais
                     if pillar and props.get("pillar", "") != pillar:
                         if not any(lbl == pillar for lbl in node_labels):
@@ -215,6 +218,9 @@ async def query_context(
         row = expand_records[0]
         for n in row.get("nodes", []):
             if n and n.get("id"):
+                # Excluir DocumentChunk nodes da resposta final
+                if "__chunk_" in str(n.get("id", "")):
+                    continue
                 node_labels = list(n.labels) if hasattr(n, "labels") else []
                 # Enriquecer com labels do seed se disponível
                 if n["id"] in seed_props:
@@ -223,6 +229,12 @@ async def query_context(
 
         for e in row.get("edges", []):
             if e and e.get("from") and e.get("to"):
+                # Excluir arestas CHUNK_OF — são internas ao RAG, não relevantes para o contexto de produto
+                if e.get("type") == "CHUNK_OF":
+                    continue
+                # Excluir arestas que envolvem chunks
+                if "__chunk_" in str(e.get("from", "")) or "__chunk_" in str(e.get("to", "")):
+                    continue
                 edges.append(EdgeContext(
                     from_id=e["from"],
                     to_id=e["to"],
