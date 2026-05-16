@@ -336,3 +336,39 @@ async def ingest_manifest(
         ),
     )
 
+
+# ─── Reset endpoint ──────────────────────────────────────────────────────────
+
+
+class GraphResetResponse(BaseModel):
+    nodes_deleted: int
+    message: str
+
+
+@router.delete(
+    "/graph",
+    response_model=GraphResetResponse,
+    summary="Limpa todos os nós e arestas do grafo",
+    description=(
+        "Remove todos os nós e relacionamentos do Neo4j (MATCH (n) DETACH DELETE n). "
+        "Operação destrutiva e irreversível — requer token de autenticação. "
+        "Útil para resetar o grafo antes de uma re-ingestão completa."
+    ),
+)
+async def reset_graph(
+    _token: str = Depends(_verify_token),
+) -> GraphResetResponse:
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted"
+        )
+        record = await result.single()
+        deleted = record["deleted"] if record else 0
+
+    logger.warning("Graph reset: %d nodes deleted", deleted)
+    return GraphResetResponse(
+        nodes_deleted=deleted,
+        message=f"Grafo limpo: {deleted} nós removidos",
+    )
+
