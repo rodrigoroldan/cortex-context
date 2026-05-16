@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     neo4j_password: str = "cortex-secret"
 
     # API
-    cortex_api_token: str = "dev-token"
+    # Deixar vazio para desabilitar autenticação (modo aberto)
+    # Definir um valor para exigir Bearer token em todos os endpoints de escrita
+    cortex_api_token: str = ""
     cortex_port: int = 8082
     cortex_host: str = "0.0.0.0"
 

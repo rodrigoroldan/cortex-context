@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -38,7 +40,7 @@ from app.db.neo4j import apply_index, get_driver
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ingest"])
-bearer = HTTPBearer()
+_bearer = HTTPBearer(auto_error=False)
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent / "cortex.config.yaml"
 
@@ -47,9 +49,21 @@ _CONFIG_PATH = Path(__file__).parent.parent.parent / "cortex.config.yaml"
 
 
 def _verify_token(
-    credentials: HTTPAuthorizationCredentials = Security(bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer),
     settings=Depends(get_settings),
 ) -> str:
+    """Valida o Bearer token quando CORTEX_API_TOKEN está configurado.
+    Se CORTEX_API_TOKEN for vazio/não configurado, aceita qualquer requisição (modo aberto).
+    """
+    # Modo aberto: nenhum token configurado → sem autenticação
+    if not settings.cortex_api_token:
+        return ""
+    # Token configurado mas não fornecido
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token obrigatório — configure CORTEX_API_TOKEN ou remova-o para modo aberto",
+        )
     if credentials.credentials != settings.cortex_api_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     return credentials.credentials
