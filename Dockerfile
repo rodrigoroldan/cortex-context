@@ -41,8 +41,9 @@ CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "
 # ── Stage 3: Embeddings (sentence-transformers + all-MiniLM-L6-v2, ~1.5 GB) ──
 FROM runtime AS embeddings
 
-# Instala sentence-transformers (puxa PyTorch CPU-only como dep transitiva)
-RUN pip install --no-cache-dir "sentence-transformers>=2.7.0"
+# Instala sentence-transformers com PyTorch CPU-only (sem CUDA, ~500MB vs ~2GB)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir "sentence-transformers>=2.7.0"
 
 # Pré-baixa o modelo all-MiniLM-L6-v2 para dentro da imagem
 # (evita download em runtime — funciona offline após o pull)
