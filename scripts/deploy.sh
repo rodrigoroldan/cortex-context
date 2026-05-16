@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# deploy.sh — Deploy do Cortex no LXC 200 (10.11.12.200)
+# deploy.sh — Deploy do Cortex via SSH em host Proxmox + LXC
 #
 # Uso:
 #   ./scripts/deploy.sh               # Deploy normal (main)
 #   ./scripts/deploy.sh --branch dev  # Deploy de outra branch
 #   ./scripts/deploy.sh --dry-run     # Só mostra o que faria
 #
-# O script:
-#   1. Acessa o Proxmox host (10.11.12.46)
-#   2. Entra no LXC 200 via pct exec
-#   3. Faz git pull da branch main (ou --branch <branch>)
-#   4. Rebuild e restart via docker compose
-#   5. Aguarda health check em /health
+# Configuração via variáveis de ambiente (ou edite os defaults abaixo):
+#   PROXMOX_HOST  — IP/hostname do Proxmox (ex: 192.168.1.100)
+#   LXC_ID        — ID do LXC container   (ex: 100)
+#   SSH_KEY       — Caminho da chave SSH   (default: ~/.ssh/id_ed25519)
+#   CORTEX_PORT   — Porta do Cortex       (default: 8082)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PROXMOX_HOST="10.11.12.46"
-PROXMOX_USER="root"
-SSH_KEY="${HOME}/.ssh/id_ed25519"
-LXC_ID="200"
-APP_DIR="/opt/cortex"
+PROXMOX_HOST="${PROXMOX_HOST:?'Defina PROXMOX_HOST (ex: export PROXMOX_HOST=192.168.1.100)'}"
+PROXMOX_USER="${PROXMOX_USER:-root}"
+SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_ed25519}"
+LXC_ID="${LXC_ID:?'Defina LXC_ID (ex: export LXC_ID=100)'}"
+APP_DIR="${APP_DIR:-/opt/cortex}"
 BRANCH="main"
 DRY_RUN=false
-HEALTH_URL="http://10.11.12.200:8082/health"
+CORTEX_PORT="${CORTEX_PORT:-8082}"
+HEALTH_URL="http://localhost:${CORTEX_PORT}/health"
 HEALTH_RETRIES=12   # 12 × 5s = 60s timeout
 HEALTH_WAIT=5
 

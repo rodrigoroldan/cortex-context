@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# deploy-landing.sh — Deploy da landing page do Cortex no LXC 214 (porta 8080)
+# deploy-landing.sh — Deploy da landing page do Cortex via Proxmox + LXC
 #
 # Uso:
 #   ./scripts/deploy-landing.sh            # Deploy normal
 #   ./scripts/deploy-landing.sh --dry-run  # Só mostra o que faria
 #
-# O script:
-#   1. Acessa o Proxmox host (10.11.12.46)
-#   2. Copia docs/landing/index.html para /var/www/cortex-context no LXC 214
-#   3. Recarrega o nginx (config já existe servindo porta 8080 → /var/www/cortex-context)
-#   4. Verifica se a página responde com HTTP 200
+# Configuração via variáveis de ambiente:
+#   PROXMOX_HOST      — IP/hostname do Proxmox    (ex: 192.168.1.100)
+#   LANDING_LXC_ID    — ID do LXC da landing page (ex: 214)
+#   LANDING_PORT      — Porta do nginx da landing  (default: 8080)
+#   SSH_KEY           — Caminho da chave SSH       (default: ~/.ssh/id_ed25519)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PROXMOX_HOST="10.11.12.46"
-PROXMOX_USER="root"
-SSH_KEY="${HOME}/.ssh/id_ed25519"
-LXC_ID="214"
+PROXMOX_HOST="${PROXMOX_HOST:?'Defina PROXMOX_HOST (ex: export PROXMOX_HOST=192.168.1.100)'}"
+PROXMOX_USER="${PROXMOX_USER:-root}"
+SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_ed25519}"
+LXC_ID="${LANDING_LXC_ID:?'Defina LANDING_LXC_ID (ex: export LANDING_LXC_ID=214)'}"
 LANDING_SRC="$(cd "$(dirname "$0")/.." && pwd)/docs/landing/index.html"
-# Diretório real que o nginx do LXC 214 já serve na porta 8080
+# Diretório real que o nginx do LXC já serve
 LANDING_DEST_DIR="/var/www/cortex-context"
 LANDING_DEST="${LANDING_DEST_DIR}/index.html"
-PORT=8080
-HEALTH_URL="http://10.11.12.31:${PORT}/"
+PORT="${LANDING_PORT:-8080}"
+HEALTH_URL="${LANDING_HEALTH_URL:-http://localhost:${PORT}/}"
 HEALTH_RETRIES=12
 HEALTH_WAIT=3
 DRY_RUN=false

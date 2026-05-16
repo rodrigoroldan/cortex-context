@@ -4,7 +4,7 @@ version: "3.8"
 # Modo padrão: network_mode: host (necessário para Docker em LXC unprivileged Proxmox).
 # Bridge networking requer sysctl net.ipv4.ip_unprivileged_port_start=0 que não
 # está disponível em LXC unprivileged. Com host networking, serviços se comunicam
-# via localhost e são acessíveis diretamente no IP do LXC (10.11.12.200).
+# via localhost e são acessíveis diretamente no IP do host/LXC.
 #
 # Para usar bridge networking (fora de LXC ou com LXC privilegiado):
 #   1. Comente os blocos `network_mode: host` abaixo
@@ -45,7 +45,7 @@ services:
     # networks: [cortex-net]        # ← descomentar para bridge mode
     # ports: ["8082:8082"]
     environment:
-      NEO4J_URI: bolt://localhost:7687   # bolt://neo4j:7687 para bridge mode
+      NEO4J_URI: bolt://localhost:7687 # bolt://neo4j:7687 para bridge mode
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-cortex-secret}
       CORTEX_API_TOKEN: ${CORTEX_API_TOKEN:-dev-token}
