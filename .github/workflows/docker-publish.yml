@@ -68,13 +68,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.GHCR_IMAGE }}
+          labels: |
+            org.opencontainers.image.description=Base image — Neo4j graph API, sem embeddings (~500 MB)
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-,enable=${{ github.ref_type == 'branch' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: 🔨 Build and push (GHCR)
@@ -94,11 +92,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.GHCR_IMAGE }}
+          labels: |
+            org.opencontainers.image.description=Embeddings image — sentence-transformers + PyTorch CPU (~1.5 GB)
           tags: |
             type=ref,event=branch,suffix=-embeddings
             type=semver,pattern={{version}},suffix=-embeddings
-            type=semver,pattern={{major}}.{{minor}},suffix=-embeddings
-            type=semver,pattern={{major}},suffix=-embeddings
             type=raw,value=latest-embeddings,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: 🔨 Build and push — embeddings variant (GHCR)
@@ -119,11 +117,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.GHCR_IMAGE }}
+          labels: |
+            org.opencontainers.image.description=Embeddings GPU image — sentence-transformers + PyTorch CUDA (~2 GB, requer nvidia)
           tags: |
             type=ref,event=branch,suffix=-embeddings-gpu
             type=semver,pattern={{version}},suffix=-embeddings-gpu
-            type=semver,pattern={{major}}.{{minor}},suffix=-embeddings-gpu
-            type=semver,pattern={{major}},suffix=-embeddings-gpu
             type=raw,value=latest-embeddings-gpu,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: 🔨 Build and push — embeddings-gpu variant (GHCR)
@@ -138,6 +136,15 @@ jobs:
           labels: ${{ steps.meta-embeddings-gpu.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 🧹 Delete untagged package versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: cortex-context
+          package-type: container
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: true
+        continue-on-error: true
 
       - name: 📊 Build Summary
         if: always()

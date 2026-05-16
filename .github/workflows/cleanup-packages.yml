@@ -1,0 +1,135 @@
+name: 🧹 Cleanup Old Package Versions
+
+on:
+  schedule:
+    # Toda domingo às 4h UTC
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — apenas lista o que seria deletado, sem deletar"
+        type: boolean
+        default: true
+
+jobs:
+  cleanup:
+    name: 🗑️ Clean GHCR — cortex-context
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      # ── Passo 1: deletar imagens sem tag (ghosts acumulados) ────────────────
+      - name: 🧹 Delete untagged versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: cortex-context
+          package-type: container
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: true
+        continue-on-error: true
+
+      # ── Passo 2: via GitHub API, listar e deletar versões com SHA tags ──────
+      # Tags no formato `main-<7hex>` ou `develop-<7hex>` geradas por runs antigos
+      - name: 🔍 List and delete stale SHA-tagged versions
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Buscando versões com tags SHA stale ==="
+
+          PAGE=1
+          DELETED=0
+
+          while true; do
+            VERSIONS=$(curl -s \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/packages/container/cortex-context/versions?per_page=100&page=$PAGE")
+
+            COUNT=$(echo "$VERSIONS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))")
+            if [ "$COUNT" = "0" ]; then break; fi
+
+            # Identifica versões onde TODOS os tags são SHA-based
+            # Exemplos de tags SHA: main-a1b2c3d, develop-f4e5d6c
+            STALE_IDS=$(echo "$VERSIONS" | python3 -c "
+          import json, sys, re
+          data = json.load(sys.stdin)
+          sha_pattern = re.compile(r'^(main|develop)-[0-9a-f]{7,40}$')
+          for v in data:
+              tags = v.get('metadata', {}).get('container', {}).get('tags', [])
+              if tags and all(sha_pattern.match(t) for t in tags):
+                  age_days = ''
+                  print(v['id'], ','.join(tags))
+          ")
+
+            if [ -n "$STALE_IDS" ]; then
+              while IFS=' ' read -r version_id tags; do
+                echo "  Deletando $version_id (tags: $tags)"
+                curl -s -X DELETE \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/user/packages/container/cortex-context/versions/$version_id"
+                DELETED=$((DELETED+1))
+              done <<< "$STALE_IDS"
+            fi
+
+            PAGE=$((PAGE+1))
+          done
+
+          echo "=== Total deletado: $DELETED versões com SHA tags ==="
+
+      # ── Dry run: apenas lista o que seria deletado ──────────────────────────
+      - name: 🔍 Dry run — list stale SHA-tagged versions (sem deletar)
+        if: ${{ inputs.dry_run == true || github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== DRY RUN: versões com SHA tags que seriam deletadas ==="
+
+          PAGE=1
+          FOUND=0
+
+          while true; do
+            VERSIONS=$(curl -s \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/packages/container/cortex-context/versions?per_page=100&page=$PAGE")
+
+            COUNT=$(echo "$VERSIONS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))")
+            if [ "$COUNT" = "0" ]; then break; fi
+
+            echo "$VERSIONS" | python3 -c "
+          import json, sys, re
+          data = json.load(sys.stdin)
+          sha_pattern = re.compile(r'^(main|develop)-[0-9a-f]{7,40}$')
+          for v in data:
+              tags = v.get('metadata', {}).get('container', {}).get('tags', [])
+              updated = v.get('updated_at', '')[:10]
+              if tags and all(sha_pattern.match(t) for t in tags):
+                  print(f\"  [{updated}] id={v['id']} tags={', '.join(tags)}\")
+          "
+            PAGE=$((PAGE+1))
+          done
+
+          echo ""
+          echo "Para deletar de verdade: rode o workflow com dry_run=false"
+
+      # ── Resumo ──────────────────────────────────────────────────────────────
+      - name: 📊 Cleanup Summary
+        if: always()
+        run: |
+          echo "### 🧹 Cleanup GHCR — cortex-context" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag mantida | Descrição |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`latest\` | Base image atual (main) |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`latest-embeddings\` | Embeddings CPU atual (main) |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`latest-embeddings-gpu\` | Embeddings GPU atual (main) |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`develop\` | Base image develop |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`develop-embeddings\` | Embeddings CPU develop |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`develop-embeddings-gpu\` | Embeddings GPU develop |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`v*\` | Semver tags (todas mantidas) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry run:** \`${{ inputs.dry_run }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Executado em:** \`$(date -u)\`" >> $GITHUB_STEP_SUMMARY
