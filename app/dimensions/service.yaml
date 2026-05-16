@@ -1,0 +1,66 @@
+# app/dimensions/service.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar System — Serviços e Componentes de Arquitetura
+#
+# Representa o "Como" em alto nível: microserviços, bancos de dados,
+# APIs externas, componentes de infraestrutura, ADRs.
+#
+# Cada manifesto (AGENTS.md / agents.md / README.md) gera um nó (:Service:System).
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: service
+node_label: Service
+pillar: System
+parser: builtin.agents_manifest
+source_type: filesystem
+source_path: "/repos"
+source_patterns:
+  - "**/AGENTS.md"
+  - "**/agents.md"
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador único do serviço (ex: service-backend)"
+  - name: name
+    type: string
+    description: "Nome legível do serviço"
+  - name: tech
+    type: list[string]
+    description: "Stack tecnológico detectado"
+  - name: capabilities
+    type: string
+    description: "Capacidades e features do serviço"
+  - name: port
+    type: integer
+    description: "Porta padrão do serviço"
+  - name: url
+    type: string
+    description: "URL do serviço (se disponível)"
+
+relationships:
+  - type: DEPENDS_ON
+    direction: outbound
+    target_label: Service
+    description: "Este serviço depende de outro serviço"
+    built_by: relationship_builder
+  - type: CALLS
+    direction: outbound
+    target_label: Service
+    description: "Este serviço faz chamadas HTTP para outro"
+    built_by: relationship_builder
+  - type: EXPOSES
+    direction: outbound
+    target_label: Service
+    description: "Este serviço expõe uma API"
+    built_by: relationship_builder
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT service_id IF NOT EXISTS FOR (n:Service) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: service_fulltext
+    properties: [name, tech_str, capabilities_str]
+    cypher: "CREATE FULLTEXT INDEX service_fulltext IF NOT EXISTS FOR (n:Service) ON EACH [n.name, n.tech_str, n.capabilities_str]"

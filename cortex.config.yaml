@@ -1,0 +1,108 @@
+# cortex.config.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Cortex Context — Configuração do Knowledge Graph
+#
+# Este arquivo é totalmente agnóstico ao produto. Configure as dimensões
+# que fazem sentido para o SEU contexto — qualquer empresa pode usar.
+#
+# Ontologia I.S.I.R (4 pilares universais):
+#   Intent         — O "Por quê". Specs, Requisitos, Épicos, User Stories.
+#   System         — O "Como" (alto nível). Serviços, ADRs, Bancos, APIs.
+#   Implementation — O "O quê" (concreto). Módulos, Workflows, Componentes.
+#   Runtime        — O "Mundo real". Alertas, Deployments, Incidentes.
+#
+# Cada dimensão declara:
+#   pillar       → Um dos 4 pilares acima
+#   node_label   → Label da entidade no Neo4j (ex: "Spec", "Service")
+#   parser       → builtin.* ou chave de plugin customizado
+#   source_type  → filesystem | github_api | url | plugin
+#   source_path  → Caminho/URL da fonte de dados
+#
+# Para adicionar uma nova dimensão:
+#   1. Crie app/dimensions/{nome}.yaml com pillar, node_label, parser
+#   2. Adicione o nome em active_dimensions abaixo
+#   3. Se necessário, crie um extractor customizado em plugins/
+# ─────────────────────────────────────────────────────────────────────────────
+
+cortex_version: "3.0.0"
+
+# Diretório onde os dimension YAMLs ficam (relativo à raiz do repo)
+dimensions_dir: "app/dimensions"
+
+# Diretório para plugins customizados (auto-descobertos em runtime)
+plugins_dir: "plugins"
+
+# Dimensões ativas — cada entrada deve ter um .yaml em dimensions_dir
+# Ordem não importa; o grafo é construído idempotentemente.
+active_dimensions:
+  - spec # Intent:Spec  — especificações do produto
+  - service # System:Service — microserviços e componentes
+  - workflow # Implementation:Workflow — fluxos assíncronos
+  - adr # System:ADR — Architecture Decision Records
+
+# ─── Fonte filesystem ────────────────────────────────────────────────────────
+# Configurações globais para parsers que leem o filesystem local.
+# Podem ser sobrescritas por dimension individualmente.
+filesystem:
+  # Raiz montada no container Docker (via volume bind)
+  # Exemplo: docker run -v /path/to/workspace:/workspace ...
+  workspace_root: "/workspace"
+  specs_dir: "/specs" # Diretório raiz das specs (plan.md)
+
+# ─── Fonte GitHub API ────────────────────────────────────────────────────────
+# Configurações para parsers que buscam arquivos via GitHub API.
+# Requer GITHUB_TOKEN no .env para repos privados.
+github:
+  owner: "" # Ex: "myorg" — preencha no .env ou aqui
+  default_branch: "main"
+
+# ─── Repos monitorados (source_type: github_api) ─────────────────────────────
+# Cada entrada define um repo e qual arquivo será buscado.
+# Usado pelas dimensões com source_type: github_api.
+# Formato:
+#   - name: nome-do-repo
+#     service_id: service-{nome}   # id único do nó Service no grafo
+#     agents_path: "AGENTS.md"     # arquivo de manifesto do serviço
+#     branch: "main"               # branch a buscar
+#
+# Deixe vazio ([]) se não usar source_type: github_api.
+repo_sources: []
+
+# ─── Exemplo comentado de repo_sources (descomente e adapte) ─────────────────
+# repo_sources:
+#   - name: my-backend
+#     service_id: service-my-backend
+#     agents_path: "AGENTS.md"
+#     branch: "main"
+#   - name: my-frontend
+#     service_id: service-my-frontend
+#     agents_path: "agents.md"
+#     branch: "develop"
+
+# ─── Caminho dos repos montados localmente (fallback) ────────────────────────
+# Se github_api não estiver disponível, o ingestor tenta ler dos repos
+# montados localmente neste caminho.
+repos_mount_path: "/repos"
+
+# Estratégia de ingestão de AGENTS.md
+# github: busca diretamente da API do GitHub (recomendado para produção)
+# local: lê do volume /repos montado no container (requer cópia manual)
+ingest_strategy: "github"
+
+# ─── Vector RAG (Embeddings) ──────────────────────────────────────────────────
+# Configuração de embeddings para busca semântica híbrida.
+# O provider pode ser sobrescrito via env var CORTEX_EMBEDDING_PROVIDER.
+#
+# Modos disponíveis:
+#   none   → (padrão) Desabilitado. Apenas FTS. Nenhuma dep extra necessária.
+#   local  → sentence-transformers offline (all-MiniLM-L6-v2, 384 dims).
+#            Requer: pip install "cortex-context[embeddings-local]"
+#   openai → OpenAI text-embedding-3-small (1536 dims). Requer OPENAI_API_KEY.
+#            Requer: pip install "cortex-context[embeddings-openai]"
+#
+# chunk_size e chunk_overlap controlam a fragmentação dos documentos.
+# Valores menores = chunks mais precisos mas mais fragmentados.
+vector:
+  provider: "${CORTEX_EMBEDDING_PROVIDER:none}"
+  chunk_size: 600
+  chunk_overlap: 100

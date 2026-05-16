@@ -1,0 +1,1554 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cortex Context — Product Knowledge Graph for AI Agents</title>
+    <meta
+      name="description"
+      content="GraphRAG + Vector RAG for AI coding agents. Give your Copilot deep product context with the I.S.I.R ontology."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #000;
+        --bg-card: #111;
+        --bg-card-hover: #161616;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-hover: rgba(255, 255, 255, 0.15);
+        --text-primary: #ededed;
+        --text-secondary: #a1a1aa;
+        --text-muted: #52525b;
+        --accent-blue: #2563eb;
+        --accent-purple: #7c3aed;
+        --accent-green: #10b981;
+        --font: "Geist", -apple-system, sans-serif;
+        --mono: "Geist Mono", "Fira Code", monospace;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--text-primary);
+        line-height: 1.6;
+        overflow-x: hidden;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      }
+      .grid-bg {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: radial-gradient(
+          ellipse 80% 70% at 50% 0%,
+          black 40%,
+          transparent 100%
+        );
+      }
+
+      /* NAV */
+      nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 32px;
+        height: 64px;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(16px) saturate(180%);
+        border-bottom: 1px solid var(--border);
+      }
+      .nav-logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-weight: 600;
+        font-size: 15px;
+        letter-spacing: -0.02em;
+      }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+      }
+      .nav-links a {
+        font-size: 14px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      .nav-links a:hover {
+        color: var(--text-primary);
+      }
+      .nav-cta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .btn-ghost {
+        font-size: 14px;
+        font-family: var(--font);
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--text-secondary);
+        padding: 6px 14px;
+        border-radius: 6px;
+        transition:
+          color 0.15s,
+          background 0.15s;
+        text-decoration: none;
+      }
+      .btn-ghost:hover {
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .btn-primary {
+        font-size: 14px;
+        font-family: var(--font);
+        font-weight: 500;
+        background: var(--text-primary);
+        color: #000;
+        border: none;
+        cursor: pointer;
+        padding: 7px 16px;
+        border-radius: 6px;
+        transition:
+          background 0.15s,
+          transform 0.1s;
+        text-decoration: none;
+      }
+      .btn-primary:hover {
+        background: #d4d4d8;
+        transform: translateY(-1px);
+      }
+
+      /* HERO */
+      .hero {
+        position: relative;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 120px 24px 80px;
+        overflow: hidden;
+      }
+      .hero-glow {
+        position: absolute;
+        top: -20%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 900px;
+        height: 600px;
+        background: radial-gradient(
+          ellipse at top,
+          rgba(37, 99, 235, 0.18) 0%,
+          rgba(124, 58, 237, 0.1) 40%,
+          transparent 70%
+        );
+        pointer-events: none;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 14px 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 99px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background: rgba(255, 255, 255, 0.03);
+        margin-bottom: 28px;
+      }
+      .badge-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent-green);
+        box-shadow: 0 0 6px var(--accent-green);
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .hero-eyebrow {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 14px;
+      }
+      .hero h1 {
+        font-size: clamp(60px, 9vw, 108px);
+        font-weight: 800;
+        letter-spacing: -0.05em;
+        line-height: 1;
+        margin-bottom: 16px;
+      }
+      .hero h1 .gradient {
+        background: linear-gradient(
+          135deg,
+          #60a5fa 0%,
+          #a78bfa 50%,
+          #34d399 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .hero-tagline {
+        font-size: clamp(15px, 1.8vw, 18px);
+        color: var(--text-secondary);
+        max-width: 500px;
+        line-height: 1.7;
+        margin-bottom: 36px;
+      }
+      .hero-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-bottom: 60px;
+      }
+      .btn-hero-primary {
+        font-family: var(--font);
+        font-size: 15px;
+        font-weight: 500;
+        background: var(--text-primary);
+        color: #000;
+        border: none;
+        cursor: pointer;
+        padding: 11px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+        transition:
+          background 0.15s,
+          transform 0.1s;
+      }
+      .btn-hero-primary:hover {
+        background: #d4d4d8;
+        transform: translateY(-2px);
+      }
+      .btn-hero-secondary {
+        font-family: var(--font);
+        font-size: 15px;
+        font-weight: 500;
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        padding: 11px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+        transition:
+          border-color 0.15s,
+          background 0.15s,
+          transform 0.1s;
+      }
+      .btn-hero-secondary:hover {
+        border-color: var(--border-hover);
+        background: rgba(255, 255, 255, 0.03);
+        transform: translateY(-2px);
+      }
+
+      /* CODE PREVIEW */
+      .code-preview {
+        width: 100%;
+        max-width: 620px;
+        background: #0d0d0d;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        text-align: left;
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.04),
+          0 32px 64px rgba(0, 0, 0, 0.5);
+      }
+      .code-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        background: #080808;
+      }
+      .code-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+      .code-dot.red {
+        background: #ff5f57;
+      }
+      .code-dot.yellow {
+        background: #febc2e;
+      }
+      .code-dot.green {
+        background: #28c840;
+      }
+      .code-label {
+        margin-left: 8px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .code-content {
+        padding: 20px 24px;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.8;
+        overflow-x: auto;
+      }
+      .c-comment {
+        color: #52525b;
+      }
+      .c-key {
+        color: #60a5fa;
+      }
+      .c-str {
+        color: #a3e635;
+      }
+      .c-punct {
+        color: #71717a;
+      }
+      .c-num {
+        color: #fb923c;
+      }
+      .c-tag {
+        color: #c084fc;
+      }
+
+      /* COMMON */
+      section {
+        position: relative;
+        z-index: 1;
+      }
+      .section-inner {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 88px 24px;
+      }
+      .section-label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--accent-blue);
+        margin-bottom: 14px;
+      }
+      .section-title {
+        font-size: clamp(26px, 3.5vw, 42px);
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+        margin-bottom: 14px;
+      }
+      .section-sub {
+        font-size: 16px;
+        color: var(--text-secondary);
+        max-width: 500px;
+        line-height: 1.7;
+        margin-bottom: 48px;
+      }
+      .sep {
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--border) 30%,
+          var(--border) 70%,
+          transparent
+        );
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+
+      /* STATS */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      @media (max-width: 640px) {
+        .stats-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .stat-item {
+        background: var(--bg);
+        padding: 28px 24px;
+        text-align: center;
+      }
+      .stat-num {
+        font-size: 34px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        background: linear-gradient(
+          135deg,
+          var(--text-primary),
+          var(--text-secondary)
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+
+      /* ISIR */
+      .isir-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+      .isir-card {
+        background: var(--bg-card);
+        padding: 28px 24px;
+        transition: background 0.2s;
+      }
+      .isir-card:hover {
+        background: var(--bg-card-hover);
+      }
+      .isir-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        margin-bottom: 14px;
+      }
+      .isir-card:nth-child(1) .isir-icon {
+        background: rgba(37, 99, 235, 0.15);
+      }
+      .isir-card:nth-child(2) .isir-icon {
+        background: rgba(124, 58, 237, 0.15);
+      }
+      .isir-card:nth-child(3) .isir-icon {
+        background: rgba(16, 185, 129, 0.15);
+      }
+      .isir-card:nth-child(4) .isir-icon {
+        background: rgba(249, 115, 22, 0.15);
+      }
+      .isir-pillar {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 5px;
+      }
+      .isir-name {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 8px;
+      }
+      .isir-question {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+      .isir-desc {
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.6;
+      }
+      .isir-examples {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 14px;
+      }
+      .isir-tag {
+        font-size: 11px;
+        font-family: var(--mono);
+        padding: 2px 7px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+      }
+
+      /* FEATURES */
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+      .feature-card {
+        background: var(--bg-card);
+        padding: 32px 28px;
+        transition: background 0.2s;
+      }
+      .feature-card:hover {
+        background: var(--bg-card-hover);
+      }
+      .feature-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        margin-bottom: 16px;
+      }
+      .feature-title {
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 8px;
+      }
+      .feature-desc {
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.7;
+      }
+
+      /* CLI */
+      .cli-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        align-items: start;
+      }
+      @media (max-width: 768px) {
+        .cli-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .cli-commands {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cli-row {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 16px 18px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .cli-row:hover {
+        border-color: var(--border-hover);
+        background: var(--bg-card-hover);
+      }
+      .cli-cmd {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--accent-green);
+      }
+      .cli-desc {
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.55;
+      }
+
+      /* QUERY CARD */
+      .query-card {
+        background: #080808;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .query-header {
+        padding: 13px 20px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .query-body {
+        padding: 20px;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.75;
+      }
+
+      /* INTEGRATIONS */
+      .integrations-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+      }
+      .integration-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 16px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        transition:
+          border-color 0.15s,
+          color 0.15s,
+          background 0.15s;
+      }
+      .integration-chip:hover {
+        border-color: var(--border-hover);
+        color: var(--text-primary);
+        background: var(--bg-card-hover);
+      }
+      .integration-chip span {
+        font-size: 16px;
+      }
+
+      /* CTA */
+      .cta-section {
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+      .cta-glow {
+        position: absolute;
+        bottom: -50%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 700px;
+        height: 400px;
+        background: radial-gradient(
+          ellipse at bottom,
+          rgba(124, 58, 237, 0.2) 0%,
+          transparent 70%
+        );
+        pointer-events: none;
+      }
+      .cta-title {
+        font-size: clamp(32px, 5vw, 58px);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        line-height: 1.05;
+        margin-bottom: 16px;
+      }
+      .cta-sub {
+        font-size: 17px;
+        color: var(--text-secondary);
+        margin-bottom: 36px;
+      }
+      .cta-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      /* FOOTER */
+      footer {
+        border-top: 1px solid var(--border);
+        padding: 36px 32px;
+      }
+      .footer-inner {
+        max-width: 1080px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+      .footer-logo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+      .footer-links {
+        display: flex;
+        gap: 24px;
+      }
+      .footer-links a {
+        font-size: 13px;
+        color: var(--text-muted);
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      .footer-links a:hover {
+        color: var(--text-secondary);
+      }
+      .footer-copy {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      .btn-disabled {
+        opacity: 0.4;
+        cursor: not-allowed !important;
+        pointer-events: none;
+        filter: grayscale(0.4);
+      }
+      .soon-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 600;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 4px;
+        padding: 1px 6px;
+        margin-left: 6px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        vertical-align: middle;
+      }
+      .footer-links .soon-text {
+        font-size: 13px;
+        color: var(--text-muted);
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      @media (max-width: 600px) {
+        nav {
+          padding: 0 16px;
+        }
+        .nav-links {
+          display: none;
+        }
+        .section-inner {
+          padding: 64px 20px;
+        }
+      }
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .fade-up {
+        animation: fadeUp 0.65s ease forwards;
+      }
+      .d1 {
+        animation-delay: 0.05s;
+        opacity: 0;
+      }
+      .d2 {
+        animation-delay: 0.15s;
+        opacity: 0;
+      }
+      .d3 {
+        animation-delay: 0.28s;
+        opacity: 0;
+      }
+      .d4 {
+        animation-delay: 0.42s;
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- NAV -->
+    <nav>
+      <a href="#" class="nav-logo">
+        <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+          <circle
+            cx="11"
+            cy="11"
+            r="10"
+            stroke="white"
+            stroke-width="1.5"
+            opacity="0.3"
+          />
+          <circle cx="11" cy="11" r="4" fill="white" opacity="0.9" />
+          <line
+            x1="11"
+            y1="1"
+            x2="11"
+            y2="6"
+            stroke="white"
+            stroke-width="1.5"
+            opacity="0.5"
+          />
+          <line
+            x1="11"
+            y1="16"
+            x2="11"
+            y2="21"
+            stroke="white"
+            stroke-width="1.5"
+            opacity="0.5"
+          />
+          <line
+            x1="1"
+            y1="11"
+            x2="6"
+            y2="11"
+            stroke="white"
+            stroke-width="1.5"
+            opacity="0.5"
+          />
+          <line
+            x1="16"
+            y1="11"
+            x2="21"
+            y2="11"
+            stroke="white"
+            stroke-width="1.5"
+            opacity="0.5"
+          />
+        </svg>
+        Cortex Context
+      </a>
+      <div class="nav-links">
+        <a href="#ontology">Ontology</a>
+        <a href="#cli">CLI</a>
+        <a href="#features">Features</a>
+        <a href="https://github.com/rodrigoroldan/cortex-context">Docs</a>
+      </div>
+      <div class="nav-cta">
+        <a
+          href="https://www.npmjs.com/package/@cortex-context/cli"
+          target="_blank"
+          class="btn-ghost"
+          >npm ↗</a
+        >
+        <a
+          href="https://github.com/rodrigoroldan/cortex-context"
+          target="_blank"
+          class="btn-ghost"
+          >GitHub ↗</a
+        >
+        <a href="#get-started" class="btn-primary">Get started →</a>
+      </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="grid-bg"></div>
+      <div class="hero-glow"></div>
+
+      <div class="badge fade-up">
+        <span class="badge-dot"></span>
+        v0.2.0 CLI &middot; v3 Graph + Vector RAG &middot; MCP-native
+      </div>
+      <p class="hero-eyebrow fade-up d1">
+        Product Knowledge Graph for AI Agents
+      </p>
+      <h1 class="fade-up d2"><span class="gradient">Cortex Context</span></h1>
+      <p class="hero-tagline fade-up d3">
+        Give GitHub Copilot and any AI coding agent deep, structured
+        understanding of your product — specs, services, decisions and workflows
+        — in a queryable graph.
+      </p>
+
+      <div class="hero-actions fade-up d4" style="margin-bottom: 16px">
+        <a
+          href="https://www.npmjs.com/package/@cortex-context/cli"
+          target="_blank"
+          class="btn-hero-primary"
+          >Install on npm ↗</a
+        >
+        <a href="#ontology" class="btn-hero-secondary">See how it works</a>
+      </div>
+      <p
+        class="fade-up d4"
+        style="
+          font-family: var(--mono);
+          font-size: 12px;
+          color: var(--text-muted);
+          margin-bottom: 48px;
+          letter-spacing: 0.01em;
+        "
+      >
+        npx @cortex-context/cli@latest init
+      </p>
+
+      <div class="code-preview fade-up d4">
+        <div class="code-bar">
+          <span class="code-dot red"></span><span class="code-dot yellow"></span
+          ><span class="code-dot green"></span>
+          <span class="code-label">Terminal</span>
+        </div>
+        <div class="code-content">
+          <span class="c-punct">$</span> <span class="c-tag">npx</span>
+          <span class="c-key">@cortex-context/cli@latest</span>
+          <span class="c-str">init</span><br /><br /><span
+            style="color: #52525b"
+          >
+            ◆ Phase 1 Environment</span
+          ><br /><span class="c-key"> ✓ .env</span>
+          <span class="c-str">CORTEX_URL=http://localhost:8082</span><br /><span
+            class="c-key"
+          >
+            ✓ cortex.config.yaml</span
+          >
+          <span class="c-str">ejected</span><br /><span class="c-key">
+            ✓ docker compose up</span
+          >
+          <span class="c-comment">Neo4j + Cortex API</span><br /><br /><span
+            style="color: #52525b"
+          >
+            ◆ Phase 2 MCP + Rules</span
+          ><br /><span class="c-key"> ✓ copilot-instructions</span>
+          <span class="c-str">Cortex block injected</span><br /><span
+            class="c-key"
+          >
+            ✓ .vscode/mcp.json</span
+          >
+          <span class="c-str">configured</span><br /><br /><span
+            style="color: #52525b"
+          >
+            ◆ Phase 3 Git hook</span
+          ><br /><span class="c-key"> ✓ .git/hooks/post-commit</span>
+          <span class="c-str">auto-sync installed</span><br /><br /><span
+            class="c-comment"
+          >
+            Done in 6.1s → cortex-context doctor</span
+          >
+        </div>
+      </div>
+    </section>
+
+    <!-- STATS -->
+    <div class="sep"></div>
+    <div class="section-inner" style="padding-top: 56px; padding-bottom: 56px">
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-num">4</div>
+          <div class="stat-label">I.S.I.R pillars</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">145+</div>
+          <div class="stat-label">Nodes in the graph</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">6</div>
+          <div class="stat-label">MCP tools built-in</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">100%</div>
+          <div class="stat-label">Local &amp; private</div>
+        </div>
+      </div>
+    </div>
+    <div class="sep"></div>
+
+    <!-- ONTOLOGY -->
+    <section id="ontology">
+      <div class="section-inner">
+        <div class="section-label">I.S.I.R Ontology</div>
+        <h2 class="section-title">Four pillars. Complete context.</h2>
+        <p class="section-sub">
+          Every piece of product knowledge maps to one of four universal
+          concepts, giving AI agents a structured map of your entire codebase.
+        </p>
+        <div class="isir-grid">
+          <div class="isir-card">
+            <div class="isir-icon">🎯</div>
+            <div class="isir-pillar">Pillar 1</div>
+            <div class="isir-name" style="color: #60a5fa">Intent</div>
+            <div class="isir-question">The "Why"</div>
+            <div class="isir-desc">
+              Specs, requirements and user stories that explain the purpose
+              behind every feature.
+            </div>
+            <div class="isir-examples">
+              <span class="isir-tag">:Spec</span
+              ><span class="isir-tag">:UserStory</span
+              ><span class="isir-tag">:Epic</span>
+            </div>
+          </div>
+          <div class="isir-card">
+            <div class="isir-icon">🏗️</div>
+            <div class="isir-pillar">Pillar 2</div>
+            <div class="isir-name" style="color: #a78bfa">System</div>
+            <div class="isir-question">The "How"</div>
+            <div class="isir-desc">
+              Services, ADRs and APIs that form the structural skeleton of your
+              product.
+            </div>
+            <div class="isir-examples">
+              <span class="isir-tag">:Service</span
+              ><span class="isir-tag">:ADR</span
+              ><span class="isir-tag">:API</span>
+            </div>
+          </div>
+          <div class="isir-card">
+            <div class="isir-icon">⚙️</div>
+            <div class="isir-pillar">Pillar 3</div>
+            <div class="isir-name" style="color: #34d399">Implementation</div>
+            <div class="isir-question">The "What"</div>
+            <div class="isir-desc">
+              Modules, workflows and components — the concrete building blocks
+              that make it run.
+            </div>
+            <div class="isir-examples">
+              <span class="isir-tag">:Workflow</span
+              ><span class="isir-tag">:Module</span
+              ><span class="isir-tag">:Component</span>
+            </div>
+          </div>
+          <div class="isir-card">
+            <div class="isir-icon">📡</div>
+            <div class="isir-pillar">Pillar 4</div>
+            <div class="isir-name" style="color: #fb923c">Runtime</div>
+            <div class="isir-question">The "Real world"</div>
+            <div class="isir-desc">
+              Alerts, deployments and incidents that ground AI responses in
+              what's actually happening.
+            </div>
+            <div class="isir-examples">
+              <span class="isir-tag">:Alert</span
+              ><span class="isir-tag">:Deployment</span
+              ><span class="isir-tag">:Incident</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
+    <!-- CLI -->
+    <section id="cli">
+      <div class="section-inner">
+        <div class="section-label">CLI</div>
+        <h2 class="section-title">One command. Full setup.</h2>
+        <p class="section-sub">
+          A TypeScript CLI that wires your workspace to the knowledge graph in
+          three phases: local Docker stack, MCP server config, and a git hook
+          for automatic sync on every commit.
+        </p>
+        <div
+          style="
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: #0d0d0d;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 18px;
+            margin-bottom: 32px;
+            font-family: var(--mono);
+            font-size: 13px;
+          "
+        >
+          <span class="c-punct">$</span>
+          <span class="c-tag">npx</span>
+          <span class="c-key">@cortex-context/cli@latest</span>
+          <span class="c-str">init</span>
+          <a
+            href="https://www.npmjs.com/package/@cortex-context/cli"
+            target="_blank"
+            style="
+              margin-left: 12px;
+              font-size: 11px;
+              color: var(--text-muted);
+              text-decoration: none;
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              padding: 2px 8px;
+              letter-spacing: 0.04em;
+              font-family: var(--font);
+            "
+            >npm ↗</a
+          >
+        </div>
+        <div class="cli-grid">
+          <div class="cli-commands">
+            <div class="cli-row">
+              <span class="cli-cmd">cortex-context init</span>
+              <span class="cli-desc"
+                >3-phase setup: local Docker stack + MCP server (Copilot /
+                Claude) + post-commit git hook. Run once per workspace.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">cortex-context sync</span>
+              <span class="cli-desc"
+                >Reads
+                <code style="font-family: var(--mono)">git diff HEAD~1</code>,
+                auto-extracts
+                <code style="font-family: var(--mono)">spec_ref</code> from the
+                branch name, and ingests the diff into the graph. Called
+                automatically by the hook.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">cortex-context sync --dry-run</span>
+              <span class="cli-desc"
+                >Previews the diff and detected spec_ref without sending to the
+                server. Useful for debugging the hook.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">cortex-context update</span>
+              <span class="cli-desc"
+                >Updates Skills and the MCP Server bundle in your workspace to
+                the latest published version.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">cortex-context doctor</span>
+              <span class="cli-desc"
+                >Checks Cortex connectivity, validates the local install, and
+                reports the hook and MCP server status.</span
+              >
+            </div>
+          </div>
+          <div class="query-card">
+            <div class="query-header"><span>⚡</span> Example output</div>
+            <div class="query-body">
+              <span class="c-punct">$</span>
+              <span class="c-key">cortex-context</span>
+              <span class="c-str">sync --repo .</span>
+
+              <span class="c-comment"> → spec_ref detected: spec-151</span>
+              <span class="c-comment"> ← branch: feature/151-spec150-port</span>
+
+              <span class="c-comment"
+                >✓ Diff captured 32 insertions · 4 files</span
+              >
+              <span class="c-comment"
+                >✓ Ingested in 134ms POST /api/v1/ingest</span
+              >
+              <span class="c-comment">
+                (:Commit)-[:IMPLEMENTS]->(:Spec {id:"spec-151"})</span
+              >
+
+              <span class="c-punct">$</span>
+              <span class="c-key">cortex-context</span>
+              <span class="c-str">doctor</span>
+
+              <span class="c-key"> ✓</span>
+              <span class="c-str">Cortex URL</span>
+              <span class="c-comment">http://10.11.12.200:8082</span><br /><span
+                class="c-key"
+              >
+                ✓</span
+              >
+              <span class="c-str">Neo4j</span>
+              <span class="c-comment">bolt://localhost:7687</span><br /><span
+                class="c-key"
+              >
+                ✓</span
+              >
+              <span class="c-str">Nodes in graph</span>
+              <span style="color: #e5e7eb">150</span>
+              <span class="c-comment">(122 specs · 8 svc · 15 wf)</span
+              ><br /><span class="c-key"> ✓</span>
+              <span class="c-str">Embedder</span>
+              <span class="c-comment">local (sentence-transformers)</span
+              ><br /><span class="c-key"> ✓</span>
+              <span class="c-str">MCP server</span>
+              <span class="c-comment">stdio — GitHub Copilot / Claude</span
+              ><br /><span class="c-key"> ✓</span>
+              <span class="c-str">Git hook</span>
+              <span class="c-comment">post-commit installed</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
+    <!-- FEATURES -->
+    <section id="features">
+      <div class="section-inner">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Built for the AI-native team</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon">🕸️</div>
+            <div class="feature-title">Graph-first exploration</div>
+            <div class="feature-desc">
+              FTS hits trigger 1–2 hop expansions — your agent sees a spec plus
+              everything it impacts: services, decisions, workflows.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔬</div>
+            <div class="feature-title">Hybrid RAG</div>
+            <div class="feature-desc">
+              Combine full-text precision with semantic similarity. Built-in
+              local embeddings or OpenAI for natural-language queries.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔌</div>
+            <div class="feature-title">MCP-native</div>
+            <div class="feature-desc">
+              Ships with a Model Context Protocol server. GitHub Copilot, Claude
+              Desktop and any MCP agent connects out of the box.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🧩</div>
+            <div class="feature-title">Plugin dimensions</div>
+            <div class="feature-desc">
+              Add GitHub Issues, Confluence or Jira as a single YAML + Python
+              file. No core code changes required.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔒</div>
+            <div class="feature-title">Fully local</div>
+            <div class="feature-desc">
+              Everything runs on your machine or private server. Your source
+              code never leaves your infrastructure.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">📈</div>
+            <div class="feature-title">Impact analysis</div>
+            <div class="feature-desc">
+              Ask "which services are affected by spec-070?" and get a precise
+              answer via 1–2 hop graph traversal — no grep, no guessing.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔗</div>
+            <div class="feature-title">Branch-aware spec tracking</div>
+            <div class="feature-desc">
+              <code style="font-family: var(--mono); font-size: 12px"
+                >sync</code
+              >
+              reads the branch name, extracts the spec ID from the
+              <code style="font-family: var(--mono); font-size: 12px"
+                >feature/NNN-slug</code
+              >
+              convention, and writes a
+              <code style="font-family: var(--mono); font-size: 12px"
+                >(:Commit)-[:IMPLEMENTS]->(:Spec)</code
+              >
+              edge automatically.
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">⏱️</div>
+            <div class="feature-title">Bitemporal versioning</div>
+            <div class="feature-desc">
+              Every node carries
+              <code style="font-family: var(--mono); font-size: 12px"
+                >ingested_at</code
+              >
+              and
+              <code style="font-family: var(--mono); font-size: 12px"
+                >valid_from</code
+              >
+              — know when the data was added <em>and</em> when the spec was
+              written.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
+    <!-- INTEGRATIONS -->
+    <section id="integrations">
+      <div class="section-inner" style="text-align: center">
+        <div class="section-label" style="text-align: center">Integrations</div>
+        <h2
+          class="section-title"
+          style="text-align: center; margin: 0 auto 12px"
+        >
+          Works with your stack
+        </h2>
+        <p class="section-sub" style="margin: 0 auto 44px">
+          Product-agnostic and open. Plug it into the tools your team already
+          uses.
+        </p>
+        <div class="integrations-row">
+          <div class="integration-chip"><span>🤖</span> GitHub Copilot</div>
+          <div class="integration-chip"><span>🧠</span> Claude Desktop</div>
+          <div class="integration-chip"><span>⚡</span> VS Code</div>
+          <div class="integration-chip"><span>🕸️</span> Neo4j</div>
+          <div class="integration-chip"><span>🐍</span> FastAPI</div>
+          <div class="integration-chip"><span>🐳</span> Docker</div>
+          <div class="integration-chip"><span>🐙</span> GitHub</div>
+          <div class="integration-chip"><span>📄</span> Markdown / YAML</div>
+          <div class="integration-chip"><span>🔷</span> OpenAI Embeddings</div>
+          <div class="integration-chip"><span>📦</span> npm</div>
+          <div class="integration-chip">
+            <span>🔍</span> query_product_context
+          </div>
+          <div class="integration-chip"><span>🔍</span> get_spec_context</div>
+          <div class="integration-chip">
+            <span>🔍</span> get_service_context
+          </div>
+          <div class="integration-chip"><span>📊</span> Any MCP client</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
+    <!-- GET STARTED -->
+    <section id="get-started">
+      <div class="section-inner">
+        <div class="section-label">Quick Start</div>
+        <h2 class="section-title">Up in 5 minutes</h2>
+        <p class="section-sub">Three commands to a working knowledge graph.</p>
+        <div
+          style="
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 14px;
+            margin-bottom: 48px;
+          "
+        >
+          <div class="query-card">
+            <div class="query-header">
+              <span
+                style="
+                  background: #2563eb;
+                  color: #fff;
+                  border-radius: 50%;
+                  width: 18px;
+                  height: 18px;
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-size: 10px;
+                  font-weight: 700;
+                "
+                >1</span
+              >Install the CLI
+            </div>
+            <div class="query-body">
+              <span class="c-tag">npx</span>
+              <span class="c-key">@cortex-context/cli@latest</span>
+              <span class="c-str">init</span>
+              <span class="c-comment"
+                ># or: npm install -g @cortex-context/cli</span
+              >
+            </div>
+          </div>
+          <div class="query-card">
+            <div class="query-header">
+              <span
+                style="
+                  background: #7c3aed;
+                  color: #fff;
+                  border-radius: 50%;
+                  width: 18px;
+                  height: 18px;
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-size: 10px;
+                  font-weight: 700;
+                "
+                >2</span
+              >Start the graph
+            </div>
+            <div class="query-body">
+              <span class="c-tag">docker</span>
+              <span class="c-key">compose</span>
+              <span class="c-str">up -d</span>
+              <span class="c-comment"># Starts Neo4j + Cortex API</span>
+            </div>
+          </div>
+          <div class="query-card">
+            <div class="query-header">
+              <span
+                style="
+                  background: #10b981;
+                  color: #fff;
+                  border-radius: 50%;
+                  width: 18px;
+                  height: 18px;
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-size: 10px;
+                  font-weight: 700;
+                "
+                >3</span
+              >Init &amp; sync
+            </div>
+            <div class="query-body">
+              <span class="c-tag">cortex-context</span>
+              <span class="c-key">init</span>
+              <span class="c-str">--url http://localhost:8082</span>
+              <span class="c-comment"
+                ># ✅ MCP configured + git hook installed</span
+              >
+              <span class="c-tag">cortex-context</span>
+              <span class="c-key">sync</span>
+              <span class="c-str">--repo .</span>
+              <span class="c-comment"
+                ># ✅ Graph updated — Copilot has context</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
+    <!-- CTA -->
+    <section class="cta-section">
+      <div class="cta-glow"></div>
+      <div class="section-inner">
+        <h2 class="cta-title">Your codebase has<br />a memory now.</h2>
+        <p class="cta-sub">
+          Stop pasting context into chat. Build a live knowledge graph your AI
+          agents can actually query.
+        </p>
+        <div class="cta-actions">
+          <a
+            href="https://www.npmjs.com/package/@cortex-context/cli"
+            target="_blank"
+            class="btn-hero-primary"
+            >View on npm ↗</a
+          >
+          <a href="#ontology" class="btn-hero-secondary">Explore the docs</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-logo">
+          <svg width="16" height="16" viewBox="0 0 22 22" fill="none">
+            <circle
+              cx="11"
+              cy="11"
+              r="10"
+              stroke="white"
+              stroke-width="1.5"
+              opacity="0.4"
+            />
+            <circle cx="11" cy="11" r="4" fill="white" opacity="0.7" />
+            <line
+              x1="11"
+              y1="1"
+              x2="11"
+              y2="6"
+              stroke="white"
+              stroke-width="1.5"
+              opacity="0.4"
+            />
+            <line
+              x1="11"
+              y1="16"
+              x2="11"
+              y2="21"
+              stroke="white"
+              stroke-width="1.5"
+              opacity="0.4"
+            />
+            <line
+              x1="1"
+              y1="11"
+              x2="6"
+              y2="11"
+              stroke="white"
+              stroke-width="1.5"
+              opacity="0.4"
+            />
+            <line
+              x1="16"
+              y1="11"
+              x2="21"
+              y2="11"
+              stroke="white"
+              stroke-width="1.5"
+              opacity="0.4"
+            />
+          </svg>
+          Cortex Context
+        </div>
+        <div class="footer-links">
+          <a href="#ontology">Docs</a>
+          <a
+            href="https://www.npmjs.com/package/@cortex-context/cli"
+            target="_blank"
+            >npm</a
+          >
+          <a href="#features">Features</a>
+          <a href="#cli">CLI</a>
+        </div>
+        <div class="footer-copy">
+          &copy; 2026 Cortex Context &middot; CLI v0.2.0 &middot; Graph v3
+          &middot; Open Source
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

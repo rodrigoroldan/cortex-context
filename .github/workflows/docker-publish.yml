@@ -1,0 +1,161 @@
+name: 🐳 Build and Publish Docker Image
+
+on:
+  push:
+    branches:
+      - main # → tag 'latest'
+      - develop # → tag 'develop'
+    tags:
+      - "v*.*.*" # → tags de versão semântica
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Enviar imagem para os registries?"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GHCR_IMAGE: ghcr.io/rodrigoroldan/cortex-context
+  DOCKERHUB_IMAGE: rodrigoroldan/cortex-context
+
+jobs:
+  build-and-push:
+    name: 🏗️ Build & Push Docker Image
+    runs-on: [self-hosted, cortex]
+    permissions:
+      contents: read
+      packages: write # Necessário para push no GHCR
+
+    steps:
+      - name: 🧹 Clean workspace
+        run: |
+          WORK_DIR="${GITHUB_WORKSPACE}"
+          cd ..
+          rm -rf "${WORK_DIR}" || true
+          mkdir -p "${WORK_DIR}"
+          cd "${WORK_DIR}"
+          # Limpar imagens Docker antigas (>7 dias)
+          docker image prune -a -f --filter "until=168h" 2>/dev/null || true
+          docker builder prune -f --filter "until=168h" 2>/dev/null || true
+
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: � Resolve Infisical Project
+        id: infisical
+        uses: rodrigoroldan/role-organizado-workspace/.github/actions/resolve-infisical-project@main
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          repo-name: cortex-context-xg-hh
+
+      - name: 🔐 Fetch secrets from Infisical
+        env:
+          INFISICAL_TOKEN: ${{ steps.infisical.outputs.token }}
+          INFISICAL_PROJECT_ID: ${{ steps.infisical.outputs.project-id }}
+        run: |
+          INFISICAL_URL="http://10.11.12.230:8080"
+
+          SECRETS_JSON=$(curl -sf \
+            "$INFISICAL_URL/api/v3/secrets/raw?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=/" \
+            -H "Authorization: Bearer $INFISICAL_TOKEN")
+
+          while IFS= read -r entry; do
+            KEY=$(echo "$entry" | jq -r '.secretKey')
+            VALUE=$(echo "$entry" | jq -r '.secretValue')
+            if [ -z "$KEY" ] || [ "$KEY" = "null" ]; then continue; fi
+            echo "::add-mask::$VALUE"
+            echo "$VALUE" | while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done
+            printf '%s<<_INFISICAL_EOF_\n%s\n_INFISICAL_EOF_\n' "$KEY" "$VALUE" >> $GITHUB_ENV
+          done < <(echo "$SECRETS_JSON" | jq -c '.secrets[]')
+
+          echo "✅ $(echo "$SECRETS_JSON" | jq '.secrets | length') secrets carregados do Infisical (prod)"
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: 🔑 Log in to GHCR (GitHub Container Registry)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔑 Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata — GHCR
+        id: meta-ghcr
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: 🏷️ Extract metadata — Docker Hub
+        id: meta-dockerhub
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: 🔨 Build and push (GHCR + Docker Hub)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push != 'false') }}
+          tags: |
+            ${{ steps.meta-ghcr.outputs.tags }}
+            ${{ steps.meta-dockerhub.outputs.tags }}
+          labels: ${{ steps.meta-ghcr.outputs.labels }}
+          # Cache local do runner (sem upload/download remoto)
+          cache-from: type=local,src=/tmp/.buildx-cache-cortex
+          cache-to: type=local,dest=/tmp/.buildx-cache-cortex-new,mode=max
+
+      - name: 🔄 Rotate Docker build cache
+        if: always()
+        run: |
+          rm -rf /tmp/.buildx-cache-cortex || true
+          mv /tmp/.buildx-cache-cortex-new /tmp/.buildx-cache-cortex || true
+          docker builder prune -f --filter "until=168h" 2>/dev/null || true
+
+      - name: 📊 Build Summary
+        if: always()
+        run: |
+          echo "### 🐳 Imagem Docker publicada!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Registry | Tags |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **GHCR** | \`${{ steps.meta-ghcr.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Docker Hub** | \`${{ steps.meta-dockerhub.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,79 @@
+# app/dimensions/spec.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar Intent — Especificações do Produto
+#
+# Representa o "Por Quê" do sistema. Qualquer documento que captura
+# intenção de produto: specs, requisitos, épicos, user stories, RFCs.
+#
+# Cada arquivo gera um nó (:Spec:Intent) com:
+#   id     → spec-{NNN} ou spec-{slug}
+#   title  → # H1 ou frontmatter.title
+#   status → frontmatter.status ou "unknown"
+#   labels → inferidos do slug + frontmatter.labels
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: spec
+node_label: Spec
+pillar: Intent
+parser: builtin.markdown_frontmatter
+source_type: filesystem
+source_path: "/specs"
+source_patterns:
+  - "**/plan.md"
+  - "**/spec.md"
+  - "**/README.md"
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador único da spec (ex: spec-042)"
+  - name: title
+    type: string
+    required: true
+    description: "Título legível da spec"
+  - name: status
+    type: string
+    description: "Status: planned | in-progress | done | deprecated"
+  - name: summary
+    type: string
+    description: "Resumo de uma linha da spec"
+  - name: labels
+    type: list[string]
+    description: "Tags semânticas inferidas do slug e do frontmatter"
+
+relationships:
+  - type: DEPENDS_ON
+    direction: outbound
+    target_label: Spec
+    description: "Esta spec depende de outra spec"
+    built_by: parser
+  - type: SUPERSEDES
+    direction: outbound
+    target_label: Spec
+    description: "Esta spec substitui uma spec mais antiga"
+    built_by: parser
+  - type: EVOLVES_FROM
+    direction: outbound
+    target_label: Spec
+    description: "Evolução de outra spec"
+    built_by: parser
+  - type: RELATED_TO
+    direction: outbound
+    target_label: Spec
+    description: "Specs relacionadas"
+    built_by: parser
+  - type: AFFECTS
+    direction: outbound
+    target_label: Service
+    description: "Esta spec afeta um serviço"
+    built_by: relationship_builder
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT spec_id IF NOT EXISTS FOR (n:Spec) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: spec_fulltext
+    properties: [title, summary, labels_str]
+    cypher: "CREATE FULLTEXT INDEX spec_fulltext IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]"

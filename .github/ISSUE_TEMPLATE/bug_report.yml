@@ -1,0 +1,50 @@
+name: Bug Report
+description: Report a bug in Cortex Context
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Cortex Version
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python Version
+      options: ["3.11", "3.12", "3.13"]
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options: ["Linux", "macOS", "Windows"]
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: "1. Run `docker compose up`\n2. POST /api/v1/ingest\n3. See error"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      render: shell
