@@ -113,6 +113,32 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # ── GPU variant (embeddings stage + PyTorch CUDA) ──────────────────────
+      - name: 🏷️ Extract metadata (gpu)
+        id: meta-gpu
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=ref,event=branch,suffix=-gpu
+            type=semver,pattern={{version}},suffix=-gpu
+            type=semver,pattern={{major}}.{{minor}},suffix=-gpu
+            type=semver,pattern={{major}},suffix=-gpu
+            type=raw,value=latest-gpu,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: 🔨 Build and push — gpu variant (GHCR)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: embeddings
+          build-args: GPU=true
+          push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push != 'false') }}
+          tags: ${{ steps.meta-gpu.outputs.tags }}
+          labels: ${{ steps.meta-gpu.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: 📊 Build Summary
         if: always()
         run: |
@@ -122,6 +148,7 @@ jobs:
           echo "|----------|----------|------|" >> $GITHUB_STEP_SUMMARY
           echo "| **base** | **GHCR** | \`${{ steps.meta.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **embeddings** | **GHCR** | \`${{ steps.meta-embeddings.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **gpu** | **GHCR** | \`${{ steps.meta-gpu.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
