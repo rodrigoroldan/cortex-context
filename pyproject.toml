@@ -1,6 +1,6 @@
 [project]
 name = "cortex-context"
-version = "0.2.0"
+version = "0.0.1"
 description = "Cortex — Product Knowledge Graph (GraphRAG + Vector RAG) para contextualização de produto"
 readme = "README.md"
 requires-python = ">=3.11"
