@@ -46,10 +46,7 @@ RUN pip install --no-cache-dir "sentence-transformers>=2.7.0"
 
 # Pré-baixa o modelo all-MiniLM-L6-v2 para dentro da imagem
 # (evita download em runtime — funciona offline após o pull)
-RUN python -c "\
-  from sentence_transformers import SentenceTransformer; \
-  SentenceTransformer('all-MiniLM-L6-v2'); \
-  print('Model cached successfully')"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2'); print('Model cached successfully')"
 
 ENV CORTEX_EMBEDDING_PROVIDER=local \
   CORTEX_EMBEDDING_MODEL=all-MiniLM-L6-v2
