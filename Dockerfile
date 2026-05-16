@@ -38,12 +38,19 @@ EXPOSE 8082
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8082", "--workers", "2"]
 
-# ── Stage 3: Embeddings (sentence-transformers + all-MiniLM-L6-v2, ~1.5 GB) ──
+# ── Stage 3: Embeddings (sentence-transformers + all-MiniLM-L6-v2) ──
 FROM runtime AS embeddings
 
-# Instala sentence-transformers com PyTorch CPU-only (sem CUDA, ~500MB vs ~2GB)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir "sentence-transformers>=2.7.0"
+# GPU=false (padrão) → PyTorch CPU-only (~500MB)
+# GPU=true           → PyTorch CUDA completo (~2GB, requer GPU nvidia no host)
+# Uso: docker build --build-arg GPU=true ...
+ARG GPU=false
+RUN if [ "$GPU" = "true" ]; then \
+      pip install --no-cache-dir torch "sentence-transformers>=2.7.0"; \
+    else \
+      pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+      pip install --no-cache-dir "sentence-transformers>=2.7.0"; \
+    fi
 
 # Pré-baixa o modelo all-MiniLM-L6-v2 para dentro da imagem
 # (evita download em runtime — funciona offline após o pull)
