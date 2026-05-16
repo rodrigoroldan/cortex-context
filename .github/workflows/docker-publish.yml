@@ -6,7 +6,7 @@ on:
       - main # → tag 'latest'
       - develop # → tag 'develop'
     tags:
-      - "v*.*.*" # → tags de versão semântica
+      - "v*" # → tags de versão semântica (alinhado com cli-cortex-context)
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -73,6 +73,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
