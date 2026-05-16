@@ -19,17 +19,10 @@ jobs:
       packages: write
 
     steps:
-      # ── Passo 1: deletar imagens sem tag (ghosts acumulados) ────────────────
-      - name: 🧹 Delete untagged versions
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: cortex-context
-          package-type: container
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: true
-        continue-on-error: true
-
-      # ── Passo 2: via GitHub API, listar e deletar versões com SHA tags ──────
+      # ── Passo 1: via GitHub API, listar e deletar versões com SHA tags ──────
+      # ⚠️ NÃO deletar untagged: são manifestos de provenance/attestation gerados pelo
+      # docker/build-push-action que fazem parte do manifest list do latest/main/v*.
+      # Deletar untagged quebra o pull das tags (manifest SHA not found).
       # Tags no formato `main-<7hex>` ou `develop-<7hex>` geradas por runs antigos
       - name: 🔍 List and delete stale SHA-tagged versions
         if: ${{ inputs.dry_run != true }}
