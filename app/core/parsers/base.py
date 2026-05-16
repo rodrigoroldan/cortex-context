@@ -80,6 +80,11 @@ class NodeData:
         return self.node_labels[0] if self.node_labels else "Node"
 
     @property
+    def node_label(self) -> str:
+        """Alias para primary_label (compat. com parsers e testes)."""
+        return self.primary_label
+
+    @property
     def pillar_label(self) -> str | None:
         """Label do pilar I.S.I.R (segunda da lista, se presente)."""
         return self.node_labels[1] if len(self.node_labels) > 1 else None
