@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app.core.parsers.base import BaseCortexExtractor, EdgeData, NodeData, ParseResult
+from app.core.parsers.base import BaseCortexExtractor, NodeData, ParseResult
 
 if TYPE_CHECKING:
     from app.core.dimension_loader import DimensionConfig

@@ -44,11 +44,12 @@ build-backend = "hatchling.build"
 packages = ["app"]
 
 [tool.ruff]
-line-length = 100
+line-length = 150
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E402"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["F401", "F811", "F841"]

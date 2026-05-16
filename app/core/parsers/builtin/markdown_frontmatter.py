@@ -145,7 +145,7 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
         if "id" in frontmatter:
             node_id = str(frontmatter["id"])
         elif match:
-            number, slug = match.group(1), match.group(2)
+            number, _ = match.group(1), match.group(2)
             node_id = f"{dimension_config.dimension}-{number}"
         else:
             node_id = f"{dimension_config.dimension}-{parent}"
