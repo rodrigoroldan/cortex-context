@@ -27,10 +27,12 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 from app.core.parsers.builtin.markdown_frontmatter import MarkdownFrontmatterParser
 from app.core.parsers.builtin.agents_manifest import AgentsManifestParser
+from app.core.parsers.temporal_workflow_yaml_parser import TemporalWorkflowYamlParser
 
 _BUILTIN_REGISTRY: dict[str, type[BaseCortexExtractor]] = {
     MarkdownFrontmatterParser.extractor_key: MarkdownFrontmatterParser,
     AgentsManifestParser.extractor_key: AgentsManifestParser,
+    TemporalWorkflowYamlParser.extractor_key: TemporalWorkflowYamlParser,
     # Aliases de compatibilidade com versões anteriores
     "spec_md": MarkdownFrontmatterParser,
     "agents_md": AgentsManifestParser,
