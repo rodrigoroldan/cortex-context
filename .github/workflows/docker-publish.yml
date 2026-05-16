@@ -88,14 +88,40 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # ── Embeddings variant ──────────────────────────────────────────────────
+      - name: 🏷️ Extract metadata (embeddings)
+        id: meta-embeddings
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=ref,event=branch,suffix=-embeddings
+            type=semver,pattern={{version}},suffix=-embeddings
+            type=semver,pattern={{major}}.{{minor}},suffix=-embeddings
+            type=semver,pattern={{major}},suffix=-embeddings
+            type=raw,value=latest-embeddings,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: 🔨 Build and push — embeddings variant (GHCR)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: embeddings
+          push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push != 'false') }}
+          tags: ${{ steps.meta-embeddings.outputs.tags }}
+          labels: ${{ steps.meta-embeddings.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: 📊 Build Summary
         if: always()
         run: |
-          echo "### 🐳 Imagem Docker publicada!" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐳 Imagens Docker publicadas!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Registry | Tags |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **GHCR** | \`${{ steps.meta.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Variante | Registry | Tags |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **base** | **GHCR** | \`${{ steps.meta.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **embeddings** | **GHCR** | \`${{ steps.meta-embeddings.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
