@@ -46,6 +46,19 @@ def _verify_token(
     return credentials.credentials
 
 
+def _sanitize_props(props: dict) -> dict:
+    """Converte tipos Neo4j não-serializáveis (DateTime, Date, etc.) para string."""
+    result = {}
+    for k, v in props.items():
+        if hasattr(v, "iso_format"):  # neo4j.time.DateTime, Date, Time
+            result[k] = v.iso_format()
+        elif hasattr(v, "__class__") and v.__class__.__module__.startswith("neo4j"):
+            result[k] = str(v)
+        else:
+            result[k] = v
+    return result
+
+
 def _load_config() -> dict:
     if _CONFIG_PATH.exists():
         return yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
@@ -174,7 +187,7 @@ async def list_nodes(
             records = await result.data()
 
     return [
-        NodeSummary(id=r["props"].get("id", ""), label=dim_cfg.node_label, properties=dict(r["props"]))
+        NodeSummary(id=r["props"].get("id", ""), label=dim_cfg.node_label, properties=_sanitize_props(dict(r["props"])))
         for r in records
     ]
 
@@ -248,7 +261,7 @@ async def get_node(
                 label=n.get("label", ""),
                 relationship=n["relationship"],
                 direction="outbound",
-                properties=dict(n.get("properties") or {}),
+                properties=_sanitize_props(dict(n.get("properties") or {})),
             ))
     for n in row.get("inbound", []):
         if n and n.get("id") and n.get("relationship"):
@@ -257,14 +270,14 @@ async def get_node(
                 label=n.get("label", ""),
                 relationship=n["relationship"],
                 direction="inbound",
-                properties=dict(n.get("properties") or {}),
+                properties=_sanitize_props(dict(n.get("properties") or {})),
             ))
 
     return NodeDetailResponse(
         node=NodeSummary(
             id=row["props"].get("id", node_id),
             label=dim_cfg.node_label,
-            properties=dict(row["props"]),
+            properties=_sanitize_props(dict(row["props"])),
         ),
         neighbors=neighbors,
     )

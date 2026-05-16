@@ -71,6 +71,19 @@ class SubgraphResponse(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
+def _sanitize_props(props: dict) -> dict:
+    """Converte tipos Neo4j não-serializáveis (DateTime, Date, etc.) para string."""
+    result = {}
+    for k, v in props.items():
+        if hasattr(v, "iso_format"):  # neo4j.time.DateTime, Date, Time
+            result[k] = v.iso_format()
+        elif hasattr(v, "__class__") and v.__class__.__module__.startswith("neo4j"):
+            result[k] = str(v)
+        else:
+            result[k] = v
+    return result
+
+
 def _neo4j_node_to_context(node_data: dict, labels: list[str]) -> NodeContext:
     """Converte um record do Neo4j para NodeContext genérico."""
     pillar = node_data.get("pillar", "")
@@ -85,7 +98,7 @@ def _neo4j_node_to_context(node_data: dict, labels: list[str]) -> NodeContext:
         id=node_data.get("id", ""),
         labels=labels,
         pillar=pillar,
-        properties=dict(node_data),
+        properties=_sanitize_props(dict(node_data)),
         title=str(node_data.get("title", "")),
         summary=str(node_data.get("summary", "")),
         status=str(node_data.get("status", "")),
