@@ -19,7 +19,7 @@ O fluxo é Hybrid GraphRAG:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -32,13 +32,17 @@ from app.db.neo4j import get_driver, vector_search
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["semantic"])
-bearer = HTTPBearer()
+bearer = HTTPBearer(auto_error=False)
 
 
 def _verify_token(
-    credentials: HTTPAuthorizationCredentials = Security(bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer),
     settings=Depends(get_settings),
 ) -> str:
+    if not settings.cortex_api_token:
+        return ""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token obrigatório")
     if credentials.credentials != settings.cortex_api_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     return credentials.credentials

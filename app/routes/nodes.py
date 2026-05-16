@@ -15,6 +15,8 @@ import logging
 from pathlib import Path
 
 import yaml
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -26,15 +28,19 @@ from app.db.neo4j import get_driver
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["nodes"])
-bearer = HTTPBearer()
+bearer = HTTPBearer(auto_error=False)
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent / "cortex.config.yaml"
 
 
 def _verify_token(
-    credentials: HTTPAuthorizationCredentials = Security(bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer),
     settings=Depends(get_settings),
 ) -> str:
+    if not settings.cortex_api_token:
+        return ""
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token obrigatório")
     if credentials.credentials != settings.cortex_api_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     return credentials.credentials
