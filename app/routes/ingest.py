@@ -284,6 +284,29 @@ async def ingest_all(
                 message=f"Erro: {e}",
             ))
 
+    # Pós-processamento: AFFECTS edges (Spec → Service) via Cypher
+    affects_created = 0
+    try:
+        driver = get_driver()
+        async with driver.session() as session:
+            result_affects = await session.run(
+                """
+                MATCH (spec:Spec) WHERE spec.repos IS NOT NULL AND size(spec.repos) > 0
+                UNWIND spec.repos AS repo
+                MATCH (svc:Service) WHERE svc.repo = repo
+                MERGE (spec)-[r:AFFECTS]->(svc)
+                ON CREATE SET r.created_at = datetime()
+                RETURN count(r) AS created
+                """
+            )
+            record = await result_affects.single()
+            affects_created = record["created"] if record else 0
+            logger.info("AFFECTS edges (Spec→Service): %d criadas/verificadas", affects_created)
+    except Exception as e:
+        logger.error("Erro ao criar AFFECTS edges: %s", e)
+
+    total_edges += affects_created
+
     return BulkIngestResponse(
         dimensions_processed=len(dims),
         total_nodes=total_nodes,
