@@ -167,6 +167,7 @@ Copy `.env.example` to `.env` and set the required values:
 | `SPECS_DIR`        | Path to your specs directory (mounted into container) | `/specs`                |
 | `REPOS_DIR`        | Path to repos with service manifests (optional)       | `/repos`                |
 | `GITHUB_TOKEN`     | GitHub token for `source_type: github_api` (optional) | —                       |
+| `CODE_INGEST_MAX_ITEMS` | Max combined files+symbols+calls+links per `POST /code/ingest` request — rejected with `413` above this (split into smaller chunks client-side) | `10000` |
 
 **Vector RAG (optional):**
 
@@ -234,6 +235,11 @@ filesystem access to your sources (bind mount). If you'd rather parse on the cli
 multi-tenancy and the Shadow Graph, and avoid ever mounting your repos into the
 server — see [`app/routes/ingest.py`](app/routes/ingest.py) and
 [`app/routes/code.py`](app/routes/code.py) for the request schemas.
+
+Both endpoints upsert nodes/edges in batches (`UNWIND`, grouped by label combination /
+relationship type) instead of one Neo4j session per node/edge, so large ASTs don't need
+to be chunked for performance — `CODE_INGEST_MAX_ITEMS` (default `10000`) is only a hard
+backstop against pathologically large single requests, not a tuning knob you need to hit.
 
 ### Full-Text Search
 

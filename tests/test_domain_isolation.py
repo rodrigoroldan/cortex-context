@@ -42,17 +42,61 @@ async def test_upsert_node_stamps_domain_id():
 @pytest.mark.asyncio
 async def test_upsert_edge_stamps_domain_id():
     driver, mock_session = _make_driver()
+    mock_result = AsyncMock()
+    mock_result.single = AsyncMock(return_value={"edge_count": 1})
+    mock_session.run = AsyncMock(return_value=mock_result)
+
     edge = EdgeData(from_id="spec-100", to_id="service-pay", relationship="AFFECTS", properties={})
 
-    await upsert_edge(driver, edge, domain_id="cartoes")
+    created = await upsert_edge(driver, edge, domain_id="cartoes")
 
     mock_session.run.assert_called_once()
     cypher = mock_session.run.call_args[0][0]
     kwargs = mock_session.run.call_args[1]
 
-    assert "domain_id: $domain_id" in cypher
+    assert "a.domain_id = $domain_id" in cypher
     assert "SET r.domain_id = $domain_id" in cypher
     assert kwargs.get("domain_id") == "cartoes"
+    assert created is True
+
+
+@pytest.mark.asyncio
+async def test_upsert_edge_returns_false_when_nodes_not_found():
+    """MERGE não roda quando o MATCH não casa nenhum nó — upsert_edge deve reportar
+    isso como False em vez de mascarar como sucesso (issue #16)."""
+    driver, mock_session = _make_driver()
+    mock_result = AsyncMock()
+    mock_result.single = AsyncMock(return_value={"edge_count": 0})
+    mock_session.run = AsyncMock(return_value=mock_result)
+
+    edge = EdgeData(from_id="spec-ghost", to_id="service-ghost", relationship="AFFECTS", properties={})
+
+    created = await upsert_edge(driver, edge, domain_id="cartoes")
+
+    assert created is False
+
+
+@pytest.mark.asyncio
+async def test_ingest_edges_reports_real_persisted_count():
+    """ingest_edges deve retornar quantas arestas foram de fato persistidas, não
+    quantas foram 'tentadas' — arestas cujo nó não foi encontrado não contam."""
+    driver, mock_session = _make_driver()
+    mock_result = AsyncMock()
+    mock_result.data = AsyncMock(
+        return_value=[
+            {"from_id": "spec-1", "to_id": "service-1", "matched": True},
+            {"from_id": "spec-2", "to_id": "service-missing", "matched": False},
+        ]
+    )
+    mock_session.run = AsyncMock(return_value=mock_result)
+
+    edges = [
+        EdgeData(from_id="spec-1", to_id="service-1", relationship="AFFECTS", properties={}),
+        EdgeData(from_id="spec-2", to_id="service-missing", relationship="AFFECTS", properties={}),
+    ]
+    count = await ingest_edges(driver, edges, domain_id="cartoes")
+
+    assert count == 1
 
 
 @pytest.mark.asyncio
