@@ -203,6 +203,15 @@ github:
 
 See [`cortex.config.yaml`](cortex.config.yaml) for the full annotated config.
 
+> **Editing config after deploy**: the reference `docker-compose.yml` mounts
+> `cortex.config.yaml`, `app/dimensions/` and `plugins/` as read-only volumes
+> over the copies baked into the image, so `git pull` + `docker compose restart
+> cortex` picks up config/dimension changes with **no rebuild** needed. If you
+> run a custom image/compose file without those mounts, the container keeps
+> using whatever was in the image at build time — silently, with no warning —
+> so you must `docker compose build` (or re-pull a rebuilt image) for changes
+> to take effect.
+
 ---
 
 ## API Reference

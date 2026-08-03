@@ -58,6 +58,12 @@ services:
       - ${SPECS_DIR:-./specs-sample}:/specs:ro
       - ${REPOS_DIR:-./repos-sample}:/repos:ro
       - ${WORKSPACE_DIR:-./repos-sample}:/workspace:ro
+      # Monta a config e as dimension YAMLs por cima da versão embutida na imagem
+      # (COPY no Dockerfile) — sem isso, editar estes arquivos no host não tem
+      # nenhum efeito até um `docker compose build` (ver issue #11).
+      - ./cortex.config.yaml:/app/cortex.config.yaml:ro
+      - ./app/dimensions:/app/app/dimensions:ro
+      - ./plugins:/app/plugins:ro
     depends_on:
       neo4j:
         condition: service_healthy
