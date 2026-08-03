@@ -1,13 +1,5 @@
 """
-routes/query.py — Consulta semântica cross-dimension ao grafo Cortex Context.
-
-Endpoints:
-  GET /api/v1/query?keywords=chat,ai            → subgrafo ~500 tokens por keywords
-  GET /api/v1/query?keywords=payment&pillar=Intent  → filtrado por pilar I.S.I.R
-  GET /api/v1/query?keywords=auth&dimension=spec    → filtrado por dimensão
-
-A busca é totalmente genérica — não assume labels fixas (Spec, Service, etc.).
-Usa o índice FTS configurado por dimensão no YAML.
+routes/query.py — Consulta semântica cross-dimension ao grafo Cortex Context com isolamento por domain_id.
 """
 from __future__ import annotations
 
@@ -20,6 +12,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.db.neo4j import get_driver
+from app.routes.dependencies import get_branch, get_domain_id
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +42,6 @@ class NodeContext(BaseModel):
     labels: list[str]         # ex: ["Spec", "Intent"]
     pillar: str               # ex: "Intent"
     properties: dict[str, Any]
-    # Campos de conveniência extraídos de properties (se disponíveis)
     title: str = ""
     summary: str = ""
     status: str = ""
@@ -72,10 +64,9 @@ class SubgraphResponse(BaseModel):
 
 
 def _sanitize_props(props: dict) -> dict:
-    """Converte tipos Neo4j não-serializáveis (DateTime, Date, etc.) para string."""
     result = {}
     for k, v in props.items():
-        if hasattr(v, "iso_format"):  # neo4j.time.DateTime, Date, Time
+        if hasattr(v, "iso_format"):
             result[k] = v.iso_format()
         elif hasattr(v, "__class__") and v.__class__.__module__.startswith("neo4j"):
             result[k] = str(v)
@@ -85,9 +76,7 @@ def _sanitize_props(props: dict) -> dict:
 
 
 def _neo4j_node_to_context(node_data: dict, labels: list[str]) -> NodeContext:
-    """Converte um record do Neo4j para NodeContext genérico."""
     pillar = node_data.get("pillar", "")
-    # Inferir pilar a partir dos labels se não for propriedade do nó
     if not pillar:
         for lbl in labels:
             if lbl in ("Intent", "System", "Implementation", "Runtime"):
@@ -106,9 +95,39 @@ def _neo4j_node_to_context(node_data: dict, labels: list[str]) -> NodeContext:
 
 
 def _estimate_tokens(nodes: list[NodeContext]) -> int:
-    """Estimativa grosseira: ~4 chars por token."""
     total = sum(len(n.title) + len(n.summary) + len(n.id) + 20 for n in nodes)
     return total // 4
+
+
+def _merge_nodes_priority(nodes: list[NodeContext], branch: str) -> list[NodeContext]:
+    """
+    Applies left-outer priority join: for entities with duplicate canonical_id or id,
+    branch draft nodes take priority over main canonical nodes.
+    """
+    if branch == "main" or not nodes:
+        return nodes
+
+    entity_map: dict[str, NodeContext] = {}
+    for node in nodes:
+        raw_key = node.properties.get("canonical_id") or node.id
+        if str(raw_key).startswith("draft:"):
+            parts = str(raw_key).split(":", 2)
+            canonical_key = parts[2] if len(parts) == 3 else str(raw_key)
+        else:
+            canonical_key = str(raw_key)
+
+        node_branch = str(node.properties.get("branch", "main"))
+        node_is_draft = bool(node.properties.get("is_draft", False)) or node.status == "draft" or node_branch == branch
+
+        if canonical_key not in entity_map:
+            entity_map[canonical_key] = node
+        else:
+            existing = entity_map[canonical_key]
+            existing_branch = str(existing.properties.get("branch", "main"))
+            if (node_branch == branch or node_is_draft) and not (existing_branch == branch):
+                entity_map[canonical_key] = node
+
+    return list(entity_map.values())
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -117,12 +136,7 @@ def _estimate_tokens(nodes: list[NodeContext]) -> int:
 @router.get(
     "/query",
     response_model=SubgraphResponse,
-    summary="Busca semântica cross-dimension por keywords",
-    description=(
-        "FTS cross-dimension usando os índices declarados nos dimension YAMLs. "
-        "Expande 1-hop no grafo para contexto de vizinhança. "
-        "Filtros opcionais: pillar (Intent|System|Implementation|Runtime), dimension (spec|service|...)."
-    ),
+    summary="Busca semântica cross-dimension por keywords com isolamento por domain_id e branch",
 )
 async def query_context(
     keywords: str,
@@ -130,6 +144,8 @@ async def query_context(
     hops: int = 1,
     pillar: str | None = None,
     dimension: str | None = None,
+    domain_id: str = Depends(get_domain_id),
+    branch: str = Depends(get_branch),
     _token: str = Depends(_verify_token),
 ) -> SubgraphResponse:
     driver = get_driver()
@@ -139,7 +155,6 @@ async def query_context(
 
     async with driver.session() as session:
         # ── Seed: FTS cross-dimension ─────────────────────────────────────────
-        # Tenta múltiplos índices FTS conhecidos e une os resultados
         fts_indexes = ["spec_fulltext", "service_fulltext", "workflow_fulltext"]
         all_seed_ids: list[str] = []
         seed_props: dict[str, dict] = {}
@@ -150,13 +165,15 @@ async def query_context(
                     f"""
                     CALL db.index.fulltext.queryNodes('{idx_name}', $query)
                     YIELD node, score
+                    WHERE (node.domain_id = $domain_id OR ($domain_id = 'default' AND node.domain_id IS NULL))
+                      AND (node.branch = $branch OR node.branch = 'main' OR node.branch IS NULL OR node.is_draft = false)
                     RETURN node {{.*}} AS props,
                            labels(node) AS labels,
                            score
                     ORDER BY score DESC
                     LIMIT $limit
                     """,
-                    {"query": fts_query, "limit": limit},
+                    {"query": fts_query, "limit": limit, "domain_id": domain_id, "branch": branch},
                 )
                 records = await seed_result.data()
                 for r in records:
@@ -165,10 +182,8 @@ async def query_context(
                     node_labels: list[str] = r.get("labels") or []
                     if not nid:
                         continue
-                    # Excluir DocumentChunk nodes — eles poluem o output e não são seeds válidos
                     if "__chunk_" in nid:
                         continue
-                    # Aplicar filtros opcionais
                     if pillar and props.get("pillar", "") != pillar:
                         if not any(lbl == pillar for lbl in node_labels):
                             continue
@@ -176,7 +191,6 @@ async def query_context(
                         all_seed_ids.append(nid)
                         seed_props[nid] = {"props": props, "labels": node_labels}
             except Exception:
-                # Índice não existe — pular silenciosamente
                 pass
 
         if not all_seed_ids:
@@ -184,15 +198,18 @@ async def query_context(
                 nodes=[],
                 edges=[],
                 token_estimate=0,
-                query_meta={"keywords": keyword_list, "seed_count": 0},
+                query_meta={"keywords": keyword_list, "seed_count": 0, "domain_id": domain_id, "branch": branch},
             )
 
         # ── Expand: 1-hop neighbors ───────────────────────────────────────────
         expand_result = await session.run(
             f"""
-            MATCH (seed) WHERE seed.id IN $seed_ids
+            MATCH (seed) WHERE seed.id IN $seed_ids AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL))
+              AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)
             OPTIONAL MATCH path = (seed)-[r*1..{hops}]-(neighbor)
             WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL
+              AND ALL(n IN nodes(path) WHERE n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))
+              AND (neighbor.branch = $branch OR neighbor.branch = 'main' OR neighbor.branch IS NULL OR neighbor.is_draft = false)
             WITH collect(DISTINCT seed) + collect(DISTINCT neighbor) AS all_nodes,
                  collect(DISTINCT r) AS all_rels
             UNWIND all_nodes AS n
@@ -207,6 +224,8 @@ async def query_context(
                    }}) AS edges
             """,
             seed_ids=all_seed_ids,
+            domain_id=domain_id,
+            branch=branch,
         )
         expand_records = await expand_result.data()
 
@@ -218,21 +237,17 @@ async def query_context(
         row = expand_records[0]
         for n in row.get("nodes", []):
             if n and n.get("id"):
-                # Excluir DocumentChunk nodes da resposta final
                 if "__chunk_" in str(n.get("id", "")):
                     continue
                 node_labels = list(n.labels) if hasattr(n, "labels") else []
-                # Enriquecer com labels do seed se disponível
                 if n["id"] in seed_props:
                     node_labels = seed_props[n["id"]]["labels"]
                 nodes.append(_neo4j_node_to_context(dict(n), node_labels))
 
         for e in row.get("edges", []):
             if e and e.get("from") and e.get("to"):
-                # Excluir arestas CHUNK_OF — são internas ao RAG, não relevantes para o contexto de produto
                 if e.get("type") == "CHUNK_OF":
                     continue
-                # Excluir arestas que envolvem chunks
                 if "__chunk_" in str(e.get("from", "")) or "__chunk_" in str(e.get("to", "")):
                     continue
                 edges.append(EdgeContext(
@@ -240,6 +255,8 @@ async def query_context(
                     to_id=e["to"],
                     relationship=e["type"],
                 ))
+
+    nodes = _merge_nodes_priority(nodes, branch)
 
     return SubgraphResponse(
         nodes=nodes,
@@ -250,5 +267,7 @@ async def query_context(
             "seed_count": len(all_seed_ids),
             "pillar_filter": pillar,
             "dimension_filter": dimension,
+            "domain_id": domain_id,
+            "branch": branch,
         },
     )

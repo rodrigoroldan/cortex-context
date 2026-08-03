@@ -1,0 +1,115 @@
+# app/dimensions/code.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar Implementation — Grafo de Código & AST (Micro-Graph)
+#
+# Representa a estrutura de código-fonte: arquivos, classes, funções,
+# interfaces e rotas, permitindo navegação de hierarquia de chamadas (Call Graph)
+# e rastreabilidade direta com Specs, ADRs e APIs.
+#
+# Cada arquivo/símbolo gera nós (:CodeFile / :CodeSymbol / :Function / :Class) com:
+#   id          → repo:path/to/file#symbolName
+#   name        → Nome do símbolo/função/classe
+#   kind        → function | method | class | interface | type | file
+#   file_path   → Caminho relativo do arquivo
+#   line_start  → Linha de início no código
+#   line_end    → Linha de fim
+#   signature   → Assinatura da função/método/classe
+#   docstring   → Documentação/JSDoc
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: code
+node_label: CodeSymbol
+pillar: Implementation
+parser: builtin.code_ast
+source_type: filesystem
+source_path: "/"
+source_patterns:
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.tsx"
+  - "**/*.jsx"
+  - "**/*.py"
+  - "**/*.go"
+  - "**/*.java"
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador único do símbolo de código (ex: repo:src/auth.ts#validateToken)"
+  - name: name
+    type: string
+    required: true
+    description: "Nome do identificador (função, classe, interface)"
+  - name: kind
+    type: string
+    required: true
+    description: "Tipo: function | method | class | interface | endpoint | file"
+  - name: file_path
+    type: string
+    required: true
+    description: "Caminho do arquivo de código relativo à raiz do repositório"
+  - name: line_start
+    type: integer
+    description: "Linha de início da definição"
+  - name: line_end
+    type: integer
+    description: "Linha de fim da definição"
+  - name: signature
+    type: string
+    description: "Assinatura do método ou função"
+  - name: docstring
+    type: string
+    description: "Docstring ou comentário explicativo"
+  - name: domain_id
+    type: string
+    description: "Identificador do domínio corporativo (multi-tenancy)"
+  - name: branch
+    type: string
+    description: "Branch git de origem (main ou feature branch)"
+
+relationships:
+  - type: CALLS
+    direction: outbound
+    target_label: CodeSymbol
+    description: "Esta função chama outra função ou método"
+    built_by: parser
+  - type: IMPORTS
+    direction: outbound
+    target_label: CodeSymbol
+    description: "Este arquivo importa outro arquivo ou módulo"
+    built_by: parser
+  - type: DEFINES
+    direction: outbound
+    target_label: CodeSymbol
+    description: "O arquivo define esta classe ou função"
+    built_by: parser
+  - type: INHERITS
+    direction: outbound
+    target_label: CodeSymbol
+    description: "Esta classe herda de outra classe ou implementa uma interface"
+    built_by: parser
+  - type: IMPLEMENTS_SPEC
+    direction: outbound
+    target_label: Spec
+    description: "Esta função ou classe implementa uma Spec de negócio"
+    built_by: parser
+  - type: EXPOSES_API
+    direction: outbound
+    target_label: API
+    description: "Este método ou handler expõe um endpoint de API"
+    built_by: parser
+  - type: COMPLIES_WITH
+    direction: outbound
+    target_label: ADR
+    description: "Esta implementação atende a uma decisão de arquitetura"
+    built_by: parser
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT code_symbol_id IF NOT EXISTS FOR (n:CodeSymbol) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: code_symbol_fulltext
+    properties: [name, signature, file_path, docstring]
+    cypher: "CREATE FULLTEXT INDEX code_symbol_fulltext IF NOT EXISTS FOR (n:CodeSymbol) ON EACH [n.name, n.signature, n.file_path, n.docstring]"

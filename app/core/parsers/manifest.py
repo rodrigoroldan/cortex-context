@@ -1,42 +1,5 @@
 """
-core/parsers/manifest.py — Schema Pydantic para Ingest Manifests.
-
-Um IngestManifest permite que o Cortex Ingestion Agent CLI local envie dados
-pré-computados (derivados de git diff + análise de spec) diretamente ao servidor
-via POST /api/v1/ingest/manifest, sem que o servidor precise parsear arquivos.
-
-Isso separa:
-  - "quem descobre os relacionamentos" → CLI agent local (no dev's machine)
-  - "quem persiste no grafo"           → Cortex API (no servidor)
-
-O manifesto é totalmente agnóstico ao produto. O CLI agent decide quais nós e
-arestas criar; o servidor apenas persiste e adiciona propriedades bitemporais.
-
-Exemplo de uso pelo CLI agent:
-  manifest = IngestManifest(
-      source="git-diff",
-      commit_sha="abc123",
-      nodes=[
-          ManifestNode(
-              node_id="spec-149",
-              node_labels=["Spec", "Intent"],
-              properties={"title": "Cortex v3.0", "status": "in-progress"}
-          ),
-          ManifestNode(
-              node_id="service-cortex",
-              node_labels=["Service", "System"],
-              properties={"name": "cortex-context"}
-          ),
-      ],
-      edges=[
-          ManifestEdge(
-              from_id="spec-149",
-              to_id="service-cortex",
-              relationship="IMPLEMENTS",
-              properties={"files_changed": 12, "via": "git-diff"}
-          ),
-      ]
-  )
+core/parsers/manifest.py — Schema Pydantic para Ingest Manifests com suporte a domain_id.
 """
 from __future__ import annotations
 
@@ -47,7 +10,7 @@ class ManifestNode(BaseModel):
     """Nó a ser inserido/atualizado no grafo."""
 
     node_id: str = Field(
-        description="ID único do nó (ex: 'spec-149', 'service-bff', 'workflow-payment')"
+        description="ID único do nó (ex: 'spec-149', 'service-bff', 'workflow-payment', ou 'draft:feat/auth:spec-149')"
     )
     node_labels: list[str] = Field(
         min_length=1,
@@ -55,6 +18,26 @@ class ManifestNode(BaseModel):
             "Labels do nó. O primeiro elemento é a label primária usada no MERGE. "
             "Ex: ['Spec', 'Intent'], ['Service', 'System']"
         ),
+    )
+    domain_id: str | None = Field(
+        default=None,
+        description="Identificador do domínio do nó. Se ausente, herda do IngestManifest."
+    )
+    branch: str | None = Field(
+        default=None,
+        description="Branch Git associada ao nó (ex: 'feat/auth'). Se ausente, herda do IngestManifest."
+    )
+    status: str | None = Field(
+        default=None,
+        description="Status do nó ('draft', 'canonical', 'active', etc.). Default: 'draft' se is_draft=True else 'canonical'."
+    )
+    is_draft: bool | None = Field(
+        default=None,
+        description="Indica se é um nó especulativo (draft). Se ausente, herda do IngestManifest."
+    )
+    canonical_id: str | None = Field(
+        default=None,
+        description="ID canônico base (sem prefixo draft:). Se ausente, derivado de node_id."
     )
     properties: dict = Field(
         default_factory=dict,
@@ -82,9 +65,6 @@ class ManifestEdge(BaseModel):
 class IngestManifest(BaseModel):
     """
     Manifesto de ingestão — payload completo para POST /api/v1/ingest/manifest.
-
-    O Cortex API persiste todos os nós e arestas, adicionando propriedades
-    bitemporais (ingested_at, valid_from) automaticamente.
     """
 
     source: str = Field(
@@ -101,6 +81,22 @@ class IngestManifest(BaseModel):
             "Propagado para a propriedade 'commit_sha' de todos os nós do manifesto."
         ),
     )
+    domain_id: str = Field(
+        default="default",
+        description="ID do domínio multi-tenant corporativo para isolamento.",
+    )
+    branch: str = Field(
+        default="main",
+        description="Nome da branch Git para ingestão (ex: 'main', 'feat/payment-v2').",
+    )
+    draft: bool = Field(
+        default=False,
+        description="Se True, marca todos os nós como especulativos (is_draft=True, status='draft').",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Se True, executa apenas validação sem persistir no Neo4j (modo PR Linter).",
+    )
     nodes: list[ManifestNode] = Field(
         default_factory=list,
         description="Lista de nós a criar/atualizar no grafo.",
@@ -116,6 +112,11 @@ class ManifestIngestResponse(BaseModel):
 
     source: str
     commit_sha: str | None
+    domain_id: str = "default"
     nodes_upserted: int
     edges_upserted: int
     message: str
+    dry_run: bool = False
+    linter_status: str = "passed"
+    validation_errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

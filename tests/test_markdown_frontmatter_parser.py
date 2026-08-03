@@ -360,3 +360,55 @@ class TestMarkdownFrontmatterParserParse:
         result = self.parser.parse(f, self.dim)
         assert result.nodes == []
         assert result.edges == []
+
+
+# ─── FrontmatterContractValidator (Feature 15) ────────────────────────────────
+
+
+class TestFrontmatterContractValidator:
+    def test_valid_frontmatter(self):
+        content = "---\ntype: spec\nid: spec-001\ntitle: Test Spec\nstatus: planned\n---\n# Body"
+        is_valid, errors = FrontmatterContractValidator.validate_content(content)
+        assert is_valid is True
+        assert len(errors) == 0
+
+    def test_missing_frontmatter_block(self):
+        content = "# Just H1 Title\nBody text"
+        is_valid, errors = FrontmatterContractValidator.validate_content(content)
+        assert is_valid is False
+        assert any("Missing YAML frontmatter block" in e for e in errors)
+
+    def test_missing_required_fields(self):
+        content = "---\ntitle: Missing type and status\nid: spec-002\n---\n# Body"
+        is_valid, errors = FrontmatterContractValidator.validate_content(content)
+        assert is_valid is False
+        assert any("Missing required frontmatter field: 'type'" in e for e in errors)
+        assert any("Missing required frontmatter field: 'status'" in e for e in errors)
+
+    def test_invalid_status_value(self):
+        content = "---\ntype: spec\nid: spec-003\ntitle: Test Spec\nstatus: unknown_val\n---\n# Body"
+        is_valid, errors = FrontmatterContractValidator.validate_content(content)
+        assert is_valid is False
+        assert any("Invalid status 'unknown_val'" in e for e in errors)
+
+    def test_invalid_id_format(self):
+        content = "---\ntype: spec\nid: Spec_004 BadId!\ntitle: Test Spec\nstatus: planned\n---\n# Body"
+        is_valid, errors = FrontmatterContractValidator.validate_content(content)
+        assert is_valid is False
+        assert any("Invalid ID format" in e for e in errors)
+
+    def test_parser_attaches_frontmatter_valid_and_errors(self, tmp_path: Path):
+        d = tmp_path / "001-test"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / "spec.md"
+        f.write_text("---\ntype: spec\nid: spec-001\ntitle: Spec Title\nstatus: planned\n---\n# Body")
+
+        parser = MarkdownFrontmatterParser()
+        dim = _FakeDimConfig(dimension="spec", pillar="Intent")
+        res = parser.parse(f, dim)
+
+        node = res.nodes[0]
+        assert node.properties["frontmatter_valid"] is True
+        assert node.properties["frontmatter_errors"] == []
+        assert node.properties["validation_status"] == "passed"
+

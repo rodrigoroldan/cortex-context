@@ -1,0 +1,47 @@
+# app/dimensions/concept.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar Intent — Glossário de Conceitos de Negócio (Ubiquitous Language)
+#
+# Representa termos e definições de domínio de negócio (Feature 11).
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: concept
+node_label: Concept
+pillar: Intent
+parser: builtin.markdown_frontmatter
+source_type: filesystem
+source_path: "/concepts"
+source_patterns:
+  - "**/*.md"
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador do conceito (ex: concept-domain-id)"
+  - name: title
+    type: string
+    required: true
+    description: "Termo / nome do conceito"
+  - name: summary
+    type: string
+    description: "Definição do conceito"
+  - name: status
+    type: string
+    description: "Status do conceito"
+
+relationships:
+  - type: RELATED_TO
+    direction: outbound
+    target_label: Concept
+    description: "Conceitos relacionados"
+    built_by: parser
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (n:Concept) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: concept_fulltext
+    properties: [title, summary]
+    cypher: "CREATE FULLTEXT INDEX concept_fulltext IF NOT EXISTS FOR (n:Concept) ON EACH [n.title, n.summary]"

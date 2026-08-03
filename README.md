@@ -1,12 +1,11 @@
 # Cortex Context
 
-> **GraphRAG + Vector RAG for AI coding assistants** — turn your specs, docs and service manifests into a queryable knowledge graph that makes GitHub Copilot (and any MCP-compatible AI) context-aware about your product.
+> **The Enterprise Context Store for AI Agents.** Transform your fragmented specs, architecture decisions, and code history into a real-time, deterministic Knowledge Graph. The ultimate backbone for the AI Development Life Cycle (AI-DLC).
 
 [![CI](https://github.com/rodrigoroldan/cortex-context/actions/workflows/ci.yml/badge.svg)](https://github.com/rodrigoroldan/cortex-context/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-blue.svg)](https://hub.docker.com/r/rodrigoroldan/cortex-context)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Neo4j](https://img.shields.io/badge/neo4j-5.x-008CC1)](https://neo4j.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
 [![npm](https://img.shields.io/badge/cli-@cortex--context%2Fcli-red)](https://www.npmjs.com/package/@cortex-context/cli)
@@ -15,17 +14,28 @@
 
 ## What is Cortex Context?
 
-Cortex Context is a **self-hosted knowledge graph server** that ingests your product documentation — specs, architecture decision records, service manifests, workflow definitions — and exposes a rich query API that AI coding assistants consume via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
+In the era of AI-assisted coding, giving an AI Agent access to a git repository is not enough. AI Agents (like GitHub Copilot, Cline, or Antigravity) constantly hallucinate when they lack the tribal knowledge, business rules, and cross-repo architectural decisions that aren't explicitly written in the code they are currently reading.
 
-Instead of your AI assistant hallucinating about your domain, it queries the live graph:
+**Cortex Context solves the Context Starvation problem.** It is a **Knowledge Feature Store (Context Store)** for LLMs. 
+
+Just like a Data Engineer uses a Feature Store to serve pre-calculated data to Machine Learning models, an Engineering team uses Cortex Context to serve pre-calculated, deterministic context graphs to AI Agents via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
+
+Instead of your AI assistant trying (and failing) to read 50 disjointed repositories to understand a business rule, it queries the live graph in milliseconds:
 
 ```
-"What specs affect the payments service?"
-  → Graph traversal: (:Spec)-[:AFFECTS]->(:Service {id: "payments"})
-  → Returns: spec-042, spec-070, spec-105 with full context
+"Which services does the Tax 2026 Spec affect?"
+  → Graph traversal: (:Spec:Intent)-[:AFFECTS]->(:Service:System)
+  → Returns: billing-api, payment-gateway (with full architectural context)
 ```
 
-It works with any team following lightweight docs-as-code conventions. No proprietary format, no cloud lock-in.
+## Why Cortex? (The AI-DLC Backbone)
+
+Pure semantic search (Vector RAG) fails at deterministic traversal. Standard enterprise catalogs (like Spotify Backstage) are rigid and designed for humans to read on dashboards.
+
+Cortex Context is built **API-first for AI Agents**:
+1. **GraphRAG + Vector RAG:** Combines the exactness of Neo4j graph relationships (`[:AFFECTS]`, `[:IMPLEMENTS]`) with semantic embeddings for fuzzy business concepts.
+2. **Zero Cognitive Tax (80/20 Rule):** 80% of the graph is built automatically by parsing your existing code (ASTs, Temporal workflows, OpenAPIs, Backstage `catalog-info.yaml`). Only 20% requires cognitive effort (writing Specs via Markdown), which your local AI Agent is guided to write for you.
+3. **The Shadow Graph (Branch-Aware):** Cortex isn't just a mirror of your `main` branch. It understands Work-In-Progress (Drafts). When an Agent is coding on a feature branch, it queries Cortex and sees the "Canonical Truth" merged with the "Branch Speculative Truth", allowing it to code with a view of the future.
 
 ---
 

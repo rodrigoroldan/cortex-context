@@ -1,0 +1,44 @@
+# app/dimensions/history.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Pilar Implementation — Histórico de Implementação e Registro de Decisões
+#
+# Representa logs de decisões, épicos e históricos (Feature 13).
+# ─────────────────────────────────────────────────────────────────────────────
+
+dimension: history
+node_label: History
+pillar: Implementation
+parser: builtin.markdown_frontmatter
+source_type: filesystem
+source_path: "/history"
+source_patterns:
+  - "**/*.md"
+
+fields:
+  - name: id
+    type: string
+    required: true
+    description: "Identificador do item de histórico (ex: history-epic-1)"
+  - name: title
+    type: string
+    required: true
+    description: "Título da entrada de histórico"
+  - name: summary
+    type: string
+    description: "Resumo da alteração/decisão"
+
+relationships:
+  - type: RELATED_TO
+    direction: outbound
+    target_label: History
+    description: "Históricos relacionados"
+    built_by: parser
+
+indexes:
+  - type: constraint_unique
+    property: id
+    cypher: "CREATE CONSTRAINT history_id IF NOT EXISTS FOR (n:History) REQUIRE n.id IS UNIQUE"
+  - type: fulltext
+    name: history_fulltext
+    properties: [title, summary]
+    cypher: "CREATE FULLTEXT INDEX history_fulltext IF NOT EXISTS FOR (n:History) ON EACH [n.title, n.summary]"

@@ -1,20 +1,5 @@
 """
-routes/semantic.py — Busca semântica por similaridade vetorial (Vector RAG).
-
-Endpoints:
-  POST /api/v1/query/semantic
-    Body: {"query": "como funciona o rateio de eventos?", "top_k": 8, "hops": 1, "pillar": "Intent"}
-    Retorna: nós mais similares + vizinhos 1-hop no grafo
-
-Requer CORTEX_EMBEDDING_PROVIDER != "none" (openai ou local).
-Se o embedder estiver desabilitado, retorna 503 com instrução de configuração.
-
-O fluxo é Hybrid GraphRAG:
-  1. Converte a query em embedding.
-  2. Busca ANN no índice vetorial (DocumentChunk nodes).
-  3. Resolve os nós pai de cada chunk.
-  4. Expande 1-hop no grafo para contexto de vizinhança.
-  5. Retorna subgrafo + score médio dos chunks encontrados.
+routes/semantic.py — Busca semântica por similaridade vetorial (Vector RAG) com isolamento por domain_id.
 """
 from __future__ import annotations
 
@@ -28,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.core.embedder import EmbedderError, embed_texts, is_embedder_enabled
 from app.db.neo4j import get_driver, vector_search
+from app.routes.dependencies import get_branch, get_domain_id
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +42,8 @@ class SemanticSearchRequest(BaseModel):
     top_k: int = Field(default=8, ge=1, le=50, description="Número de chunks similares a buscar")
     hops: int = Field(default=1, ge=0, le=2, description="Hops de expansão no grafo")
     pillar: str | None = Field(default=None, description="Filtrar por pilar I.S.I.R (Intent|System|Implementation|Runtime)")
+    domain_id: str = Field(default="default", description="Identificador do domínio para isolamento multi-tenant")
+    branch: str = Field(default="main", description="Nome da branch git para busca com overlay de shadow graph")
 
 
 class SemanticNodeResult(BaseModel):
@@ -66,7 +54,7 @@ class SemanticNodeResult(BaseModel):
     summary: str = ""
     status: str = ""
     properties: dict[str, Any] = {}
-    chunk_score: float | None = None   # Score do chunk filho que trouxe este nó
+    chunk_score: float | None = None
 
 
 class SemanticEdgeResult(BaseModel):
@@ -87,6 +75,31 @@ def _estimate_tokens(nodes: list[SemanticNodeResult]) -> int:
     return total // 4
 
 
+def _merge_semantic_nodes_priority(nodes: list[SemanticNodeResult], branch: str) -> list[SemanticNodeResult]:
+    if branch == "main" or not nodes:
+        return nodes
+    entity_map: dict[str, SemanticNodeResult] = {}
+    for node in nodes:
+        raw_key = node.properties.get("canonical_id") or node.id
+        if str(raw_key).startswith("draft:"):
+            parts = str(raw_key).split(":", 2)
+            canonical_key = parts[2] if len(parts) == 3 else str(raw_key)
+        else:
+            canonical_key = str(raw_key)
+
+        node_branch = str(node.properties.get("branch", "main"))
+        node_is_draft = bool(node.properties.get("is_draft", False)) or node.status == "draft" or node_branch == branch
+
+        if canonical_key not in entity_map:
+            entity_map[canonical_key] = node
+        else:
+            existing = entity_map[canonical_key]
+            existing_branch = str(existing.properties.get("branch", "main"))
+            if (node_branch == branch or node_is_draft) and not (existing_branch == branch):
+                entity_map[canonical_key] = node
+    return list(entity_map.values())
+
+
 # ─── Route ──────────────────────────────────────────────────────────────────────
 
 
@@ -94,17 +107,16 @@ def _estimate_tokens(nodes: list[SemanticNodeResult]) -> int:
     "/query/semantic",
     response_model=SemanticSearchResponse,
     summary="Busca semântica por similaridade vetorial (Hybrid GraphRAG)",
-    description=(
-        "Converte a query em embedding, busca os DocumentChunks mais similares "
-        "no índice vetorial Neo4j, resolve os nós pai, e expande vizinhança no grafo. "
-        "Requer CORTEX_EMBEDDING_PROVIDER != 'none'."
-    ),
 )
 async def semantic_search(
     payload: SemanticSearchRequest,
+    domain_id: str = Depends(get_domain_id),
+    branch: str = Depends(get_branch),
     _token: str = Depends(_verify_token),
 ) -> SemanticSearchResponse:
-    # ── Guard: embedder deve estar ativo ──────────────────────────────────────
+    effective_domain = payload.domain_id if (payload.domain_id and payload.domain_id != "default") else domain_id
+    effective_branch = payload.branch if (payload.branch and payload.branch != "main") else branch
+
     if not is_embedder_enabled():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -114,7 +126,6 @@ async def semantic_search(
             ),
         )
 
-    # ── Gerar embedding da query ──────────────────────────────────────────────
     try:
         embeddings = await embed_texts([payload.query])
     except EmbedderError as exc:
@@ -137,6 +148,7 @@ async def semantic_search(
         query_embedding=query_embedding,
         top_k=payload.top_k,
         pillar_filter=payload.pillar,
+        domain_id=effective_domain,
     )
 
     if not chunk_results:
@@ -144,10 +156,9 @@ async def semantic_search(
             nodes=[],
             edges=[],
             token_estimate=0,
-            query_meta={"query": payload.query, "chunk_count": 0},
+            query_meta={"query": payload.query, "chunk_count": 0, "domain_id": effective_domain, "branch": effective_branch},
         )
 
-    # Mapear parent_id → score máximo do chunk filho
     parent_scores: dict[str, float] = {}
     for row in chunk_results:
         pid = row.get("parent_id", "")
@@ -165,9 +176,9 @@ async def semantic_search(
         hop_clause = f"(seed)-[r*1..{hops}]-(neighbor)" if hops > 0 else "(seed)"
 
         cypher = f"""
-        MATCH (seed) WHERE seed.id IN $parent_ids AND NOT seed:DocumentChunk
+        MATCH (seed) WHERE seed.id IN $parent_ids AND NOT seed:DocumentChunk AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL)) AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)
         {"OPTIONAL MATCH path = " + hop_clause if hops > 0 else ""}
-        {"WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL AND NOT neighbor:DocumentChunk" if hops > 0 else ""}
+        {"WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL AND NOT neighbor:DocumentChunk AND ALL(n IN nodes(path) WHERE n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) AND (neighbor.branch = $branch OR neighbor.branch = 'main' OR neighbor.branch IS NULL OR neighbor.is_draft = false)" if hops > 0 else ""}
         WITH collect(DISTINCT seed) {("+ collect(DISTINCT neighbor)" if hops > 0 else "")} AS all_nodes,
              {("collect(DISTINCT r) AS all_rels" if hops > 0 else "[] AS all_rels")}
         UNWIND all_nodes AS n
@@ -182,7 +193,7 @@ async def semantic_search(
                }}) AS edges
         """
 
-        result = await session.run(cypher, parent_ids=parent_ids)
+        result = await session.run(cypher, parent_ids=parent_ids, domain_id=effective_domain, branch=effective_branch)
         records = await result.data()
 
     # ── Montar resposta ────────────────────────────────────────────────────────
@@ -222,7 +233,7 @@ async def semantic_search(
                     relationship=e["type"],
                 ))
 
-    # Ordenar nós por score do chunk descendente
+    nodes = _merge_semantic_nodes_priority(nodes, effective_branch)
     nodes.sort(key=lambda n: n.chunk_score or 0.0, reverse=True)
 
     return SemanticSearchResponse(
@@ -234,5 +245,7 @@ async def semantic_search(
             "chunk_count": len(chunk_results),
             "parent_count": len(parent_ids),
             "pillar_filter": payload.pillar,
+            "domain_id": effective_domain,
+            "branch": effective_branch,
         },
     )

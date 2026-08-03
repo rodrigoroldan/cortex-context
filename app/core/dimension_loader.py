@@ -57,11 +57,11 @@ class IndexConfig:
 class DimensionConfig:
     dimension: str           # ex: "spec", "service", "workflow"
     node_label: str          # ex: "Spec", "Service", "Workflow"
-    pillar: str              # Intent | System | Implementation | Runtime
-    parser: str              # chave no ParserRegistry (ex: "builtin.markdown_frontmatter")
-    source_type: str         # filesystem | github_api | url | plugin
-    source_path: str         # caminho/URL/referência da fonte
-    source_patterns: list[str]
+    pillar: str = "System"   # Intent | System | Implementation | Runtime
+    parser: str = ""         # chave no ParserRegistry (ex: "builtin.markdown_frontmatter")
+    source_type: str = "filesystem" # filesystem | github_api | url | plugin
+    source_path: str = ""    # caminho/URL/referência da fonte
+    source_patterns: list[str] = field(default_factory=list)
     fields: list[FieldConfig] = field(default_factory=list)
     relationships: list[RelationshipConfig] = field(default_factory=list)
     indexes: list[IndexConfig] = field(default_factory=list)

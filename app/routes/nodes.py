@@ -1,22 +1,14 @@
 """
-routes/nodes.py — Router genérico para consulta de qualquer dimensão do grafo.
-
-Endpoints:
-  GET /api/v1/nodes                     → lista dimensões ativas + contagem de nós
-  GET /api/v1/nodes/{dim_key}           → lista nós da dimensão (dict genérico + filtros)
-  GET /api/v1/nodes/{dim_key}/{node_id} → detalhe do nó + vizinhos 1-hop
-
-Agnóstico ao produto: dim_key é qualquer chave em active_dimensions do cortex.config.yaml.
-Exemplos: spec, service, temporal_workflow, bff_route (futuro), api_endpoint (futuro).
+routes/nodes.py — Router genérico para consulta de qualquer dimensão do grafo com isolamento por domain_id.
 """
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
-
-import yaml
 from typing import Optional
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -24,8 +16,11 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.core.dimension_loader import DimensionConfig, load_dimensions
 from app.db.neo4j import get_driver
+from app.routes.dependencies import get_branch, get_domain_id
 
 logger = logging.getLogger(__name__)
+
+IDENTIFIER_REGEX = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 router = APIRouter(tags=["nodes"])
 bearer = HTTPBearer(auto_error=False)
@@ -47,10 +42,9 @@ def _verify_token(
 
 
 def _sanitize_props(props: dict) -> dict:
-    """Converte tipos Neo4j não-serializáveis (DateTime, Date, etc.) para string."""
     result = {}
     for k, v in props.items():
-        if hasattr(v, "iso_format"):  # neo4j.time.DateTime, Date, Time
+        if hasattr(v, "iso_format"):
             result[k] = v.iso_format()
         elif hasattr(v, "__class__") and v.__class__.__module__.startswith("neo4j"):
             result[k] = str(v)
@@ -66,7 +60,6 @@ def _load_config() -> dict:
 
 
 def _load_dimension_map() -> dict[str, DimensionConfig]:
-    """Retorna {dim_key: DimensionConfig} para todas as dimensões ativas."""
     cfg = _load_config()
     dimensions_dir = Path(__file__).parent.parent.parent / cfg.get("dimensions_dir", "app/dimensions")
     active = cfg.get("active_dimensions", [])
@@ -107,18 +100,42 @@ class NodeDetailResponse(BaseModel):
     neighbors: list[NeighborSummary]
 
 
+def _merge_node_summaries_priority(items: list[NodeSummary], branch: str) -> list[NodeSummary]:
+    if branch == "main" or not items:
+        return items
+    entity_map: dict[str, NodeSummary] = {}
+    for item in items:
+        raw_key = item.properties.get("canonical_id") or item.id
+        if str(raw_key).startswith("draft:"):
+            parts = str(raw_key).split(":", 2)
+            canonical_key = parts[2] if len(parts) == 3 else str(raw_key)
+        else:
+            canonical_key = str(raw_key)
+
+        item_branch = str(item.properties.get("branch", "main"))
+        item_is_draft = bool(item.properties.get("is_draft", False)) or item.properties.get("status") == "draft" or item_branch == branch
+
+        if canonical_key not in entity_map:
+            entity_map[canonical_key] = item
+        else:
+            existing = entity_map[canonical_key]
+            existing_branch = str(existing.properties.get("branch", "main"))
+            if (item_branch == branch or item_is_draft) and not (existing_branch == branch):
+                entity_map[canonical_key] = item
+    return list(entity_map.values())
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 
 @router.get("/nodes", response_model=DimensionsResponse)
 async def list_dimensions(
+    domain_id: str = Depends(get_domain_id),
+    branch: str = Depends(get_branch),
     _token: str = Depends(_verify_token),
 ) -> DimensionsResponse:
     """
-    Lista todas as dimensões ativas e a contagem de nós de cada uma.
-
-    Retorna o catálogo vivo do grafo — qualquer nova dimensão adicionada ao
-    cortex.config.yaml aparece automaticamente aqui.
+    Lista todas as dimensões ativas e a contagem de nós de cada uma para o domain_id e branch.
     """
     dim_map = _load_dimension_map()
     driver = get_driver()
@@ -127,7 +144,9 @@ async def list_dimensions(
     for dim_key, dim_cfg in dim_map.items():
         async with driver.session() as session:
             r = await session.run(
-                f"MATCH (n:{dim_cfg.node_label}) RETURN count(n) AS cnt"
+                f"MATCH (n:{dim_cfg.node_label}) WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) RETURN count(n) AS cnt",
+                domain_id=domain_id,
+                branch=branch,
             )
             records = await r.data()
         cnt = records[0]["cnt"] if records else 0
@@ -141,18 +160,12 @@ async def list_dimensions(
 async def list_nodes(
     dim_key: str,
     request: Request,
+    domain_id: str = Depends(get_domain_id),
+    branch: str = Depends(get_branch),
     _token: str = Depends(_verify_token),
 ) -> list[NodeSummary]:
     """
-    Lista todos os nós de uma dimensão.
-
-    Qualquer query param extra é interpretado como filtro de propriedade do nó
-    (ex: ?category=scheduled, ?status=active).
-
-    Exemplos:
-      GET /api/v1/nodes/spec
-      GET /api/v1/nodes/spec?status=completed
-      GET /api/v1/nodes/temporal_workflow?category=scheduled
+    Lista todos os nós de uma dimensão filtrados por domain_id, branch e parâmetros extra.
     """
     dim_map = _load_dimension_map()
     dim_cfg = dim_map.get(dim_key)
@@ -162,8 +175,7 @@ async def list_nodes(
             detail=f"Dimensão '{dim_key}' não encontrada. Dimensões ativas: {list(dim_map.keys())}",
         )
 
-    # Extrai filtros dinâmicos do query string (ignora parâmetros internos do FastAPI)
-    _reserved = {"skip", "limit"}
+    _reserved = {"skip", "limit", "domain_id", "branch", "X-Domain-ID", "X-Cortex-Domain", "X-Cortex-Branch", "X-Branch-Name", "X-Branch"}
     filters = {
         k: v
         for k, v in request.query_params.items()
@@ -173,41 +185,44 @@ async def list_nodes(
     driver = get_driver()
 
     if filters:
+        for k in filters:
+            if not IDENTIFIER_REGEX.match(k):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Chave de filtro inválida: '{k}'. Chaves de propriedade devem corresponder ao padrão '^[a-zA-Z_][a-zA-Z0-9_]*$'.",
+                )
         where_parts = [f"n.{k} = ${k}" for k in filters]
+        where_parts.append("(n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))")
+        where_parts.append("(n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false)")
         where_clause = "WHERE " + " AND ".join(where_parts)
         cypher = f"MATCH (n:{dim_cfg.node_label}) {where_clause} RETURN n {{.*}} AS props ORDER BY n.id"
         async with driver.session() as session:
-            result = await session.run(cypher, **filters)
+            result = await session.run(cypher, domain_id=domain_id, branch=branch, **filters)
             records = await result.data()
     else:
+        cypher = f"MATCH (n:{dim_cfg.node_label}) WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) RETURN n {{.*}} AS props ORDER BY n.id"
         async with driver.session() as session:
-            result = await session.run(
-                f"MATCH (n:{dim_cfg.node_label}) RETURN n {{.*}} AS props ORDER BY n.id"
-            )
+            result = await session.run(cypher, domain_id=domain_id, branch=branch)
             records = await result.data()
 
-    return [
+    summaries = [
         NodeSummary(id=r["props"].get("id", ""), label=dim_cfg.node_label, properties=_sanitize_props(dict(r["props"])))
         for r in records
     ]
+    return _merge_node_summaries_priority(summaries, branch)
 
 
 @router.get("/nodes/{dim_key}/{node_id}", response_model=NodeDetailResponse)
 async def get_node(
     dim_key: str,
     node_id: str,
+    domain_id: str = Depends(get_domain_id),
+    branch: str = Depends(get_branch),
     _token: str = Depends(_verify_token),
 ) -> NodeDetailResponse:
     """
-    Retorna um nó pelo ID com todos os vizinhos de 1-hop e o tipo de relacionamento.
-
-    Resposta agnóstica: retorna as propriedades brutas do Neo4j + vizinhos com
-    label e tipo de aresta, sem assumir nada sobre a dimensão.
-
-    Exemplos:
-      GET /api/v1/nodes/spec/spec-070
-      GET /api/v1/nodes/service/service-backend
-      GET /api/v1/nodes/temporal_workflow/workflow-finance-reconciliation
+    Retorna um nó pelo ID com todos os vizinhos de 1-hop filtrados por domain_id e branch.
+    Se existir nó draft para a branch atual, ele sobrescreve o nó canônico main.
     """
     dim_map = _load_dimension_map()
     dim_cfg = dim_map.get(dim_key)
@@ -217,13 +232,20 @@ async def get_node(
             detail=f"Dimensão '{dim_key}' não encontrada. Dimensões ativas: {list(dim_map.keys())}",
         )
 
+    draft_id = f"draft:{branch}:{node_id}" if not node_id.startswith("draft:") else node_id
+
     driver = get_driver()
     async with driver.session() as session:
         result = await session.run(
             f"""
-            MATCH (n:{dim_cfg.node_label} {{id: $node_id}})
+            MATCH (n:{dim_cfg.node_label})
+            WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))
+              AND (n.id = $node_id OR n.id = $draft_id OR (n.canonical_id = $node_id AND n.branch = $branch) OR n.canonical_id = $node_id)
+              AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false)
             OPTIONAL MATCH (n)-[r_out]->(neighbor_out)
+            WHERE neighbor_out IS NULL OR ((neighbor_out.domain_id = $domain_id OR ($domain_id = 'default' AND neighbor_out.domain_id IS NULL)) AND (neighbor_out.branch = $branch OR neighbor_out.branch = 'main' OR neighbor_out.branch IS NULL OR neighbor_out.is_draft = false))
             OPTIONAL MATCH (n)<-[r_in]-(neighbor_in)
+            WHERE neighbor_in IS NULL OR ((neighbor_in.domain_id = $domain_id OR ($domain_id = 'default' AND neighbor_in.domain_id IS NULL)) AND (neighbor_in.branch = $branch OR neighbor_in.branch = 'main' OR neighbor_in.branch IS NULL OR neighbor_in.is_draft = false))
             RETURN
                 n {{.*}} AS props,
                 collect(DISTINCT {{
@@ -242,36 +264,59 @@ async def get_node(
                 }}) AS inbound
             """,
             node_id=node_id,
+            draft_id=draft_id,
+            domain_id=domain_id,
+            branch=branch,
         )
         records = await result.data()
 
     if not records or not records[0]["props"]:
         raise HTTPException(
             status_code=404,
-            detail=f"Nó '{node_id}' não encontrado na dimensão '{dim_key}' (:{dim_cfg.node_label})",
+            detail=f"Nó '{node_id}' não encontrado na dimensão '{dim_key}' (:{dim_cfg.node_label}) para o domínio '{domain_id}'",
         )
 
-    row = records[0]
+    # Pick draft node for requested branch if returned alongside canonical main node
+    selected_row = records[0]
+    for row in records:
+        p = row.get("props") or {}
+        if str(p.get("branch", "")) == branch or bool(p.get("is_draft", False)) or str(p.get("id", "")).startswith("draft:"):
+            selected_row = row
+            break
 
+    row = selected_row
+
+    outbound_raw = row.get("outbound", [])
+    inbound_raw = row.get("inbound", [])
+
+    # Filter out empty neighbors
     neighbors: list[NeighborSummary] = []
-    for n in row.get("outbound", []):
+    seen_neighbors: set[tuple[str, str, str]] = set()
+
+    for n in outbound_raw:
         if n and n.get("id") and n.get("relationship"):
-            neighbors.append(NeighborSummary(
-                id=n["id"],
-                label=n.get("label", ""),
-                relationship=n["relationship"],
-                direction="outbound",
-                properties=_sanitize_props(dict(n.get("properties") or {})),
-            ))
-    for n in row.get("inbound", []):
+            key = (n["id"], n["relationship"], "outbound")
+            if key not in seen_neighbors:
+                seen_neighbors.add(key)
+                neighbors.append(NeighborSummary(
+                    id=n["id"],
+                    label=n.get("label", ""),
+                    relationship=n["relationship"],
+                    direction="outbound",
+                    properties=_sanitize_props(dict(n.get("properties") or {})),
+                ))
+    for n in inbound_raw:
         if n and n.get("id") and n.get("relationship"):
-            neighbors.append(NeighborSummary(
-                id=n["id"],
-                label=n.get("label", ""),
-                relationship=n["relationship"],
-                direction="inbound",
-                properties=_sanitize_props(dict(n.get("properties") or {})),
-            ))
+            key = (n["id"], n["relationship"], "inbound")
+            if key not in seen_neighbors:
+                seen_neighbors.add(key)
+                neighbors.append(NeighborSummary(
+                    id=n["id"],
+                    label=n.get("label", ""),
+                    relationship=n["relationship"],
+                    direction="inbound",
+                    properties=_sanitize_props(dict(n.get("properties") or {})),
+                ))
 
     return NodeDetailResponse(
         node=NodeSummary(

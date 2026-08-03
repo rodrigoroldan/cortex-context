@@ -39,6 +39,8 @@ active_dimensions:
   - service # System:Service — microserviços e componentes
   - workflow # Implementation:Workflow — fluxos assíncronos
   - adr # System:ADR — Architecture Decision Records
+  - concept # Intent:Concept — glossário de conceitos de negócio
+  - history # Implementation:History — histórico de implementação e logs de decisão
 
 # ─── Fonte filesystem ────────────────────────────────────────────────────────
 # Configurações globais para parsers que leem o filesystem local.

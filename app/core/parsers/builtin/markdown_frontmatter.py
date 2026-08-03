@@ -241,6 +241,13 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
             properties["repos"] = repos
             properties["repos_str"] = " ".join(repos)
 
+        # Frontmatter Schema Contract validation (Feature 15)
+        is_fm_valid, fm_errors = FrontmatterContractValidator.validate_content(content)
+        properties["frontmatter_valid"] = is_fm_valid
+        properties["frontmatter_errors"] = fm_errors
+        properties["validation_status"] = "passed" if is_fm_valid else "failed"
+        properties["validation_errors"] = fm_errors
+
         # Mesclar campos extras do frontmatter (não sobreescreve campos base)
         for k, v in frontmatter.items():
             if k not in properties and v is not None:
@@ -285,3 +292,32 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
             nodes=[node] + chunk_nodes,
             edges=edges + chunk_edges,
         )
+
+
+class FrontmatterContractValidator:
+    """Validator for Frontmatter Schema Contracts (Feature 15)."""
+
+    REQUIRED_FIELDS = {"type", "id", "title", "status"}
+    VALID_STATUSES = {"planned", "in-progress", "completed", "done", "deprecated", "draft"}
+
+    @classmethod
+    def validate_content(cls, content: str) -> tuple[bool, list[str]]:
+        errors: list[str] = []
+        fm, body = _extract_frontmatter(content)
+
+        if not fm:
+            errors.append("Missing YAML frontmatter block (must start with '---')")
+            return False, errors
+
+        for field in cls.REQUIRED_FIELDS:
+            if field not in fm or fm[field] is None:
+                errors.append(f"Missing required frontmatter field: '{field}'")
+
+        if "status" in fm and str(fm["status"]).lower() not in cls.VALID_STATUSES:
+            errors.append(f"Invalid status '{fm['status']}'. Must be one of {cls.VALID_STATUSES}")
+
+        if "id" in fm and not re.match(r"^[a-z0-9\-]+$", str(fm["id"])):
+            errors.append(f"Invalid ID format '{fm['id']}'. Must be lowercase alphanumeric with hyphens.")
+
+        return len(errors) == 0, errors
+

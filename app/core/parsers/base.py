@@ -89,6 +89,26 @@ class NodeData:
         """Label do pilar I.S.I.R (segunda da lista, se presente)."""
         return self.node_labels[1] if len(self.node_labels) > 1 else None
 
+    @property
+    def canonical_id(self) -> str:
+        """Retorna o canonical_id do nó (extraído de properties ou derivado de node_id)."""
+        if "canonical_id" in self.properties and self.properties["canonical_id"]:
+            return str(self.properties["canonical_id"])
+        if self.node_id.startswith("draft:"):
+            parts = self.node_id.split(":", 2)
+            return parts[2] if len(parts) == 3 else self.node_id
+        return self.node_id
+
+    @property
+    def is_draft(self) -> bool:
+        """Retorna True se o nó é especulativo (draft)."""
+        return bool(self.properties.get("is_draft", False))
+
+    @property
+    def branch(self) -> str:
+        """Retorna a branch do nó (default 'main')."""
+        return str(self.properties.get("branch", "main"))
+
 
 @dataclass
 class EdgeData:

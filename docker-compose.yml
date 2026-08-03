@@ -18,7 +18,7 @@ version: "3.8"
 
 services:
   neo4j:
-    image: neo4j:5.18-community
+    image: neo4j:5.21-community
     container_name: cortex-neo4j
     restart: unless-stopped
     network_mode: host
@@ -61,6 +61,12 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
 volumes:
   neo4j-data:
