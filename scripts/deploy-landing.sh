@@ -6,26 +6,25 @@
 #   ./scripts/deploy-landing.sh --dry-run  # Só mostra o que faria
 #
 # Configuração via variáveis de ambiente:
-#   PROXMOX_HOST      — IP/hostname do Proxmox    (ex: 192.168.1.100)
-#   LANDING_LXC_ID    — ID do LXC da landing page (ex: 214)
+#   PROXMOX_HOST      — IP/hostname do Proxmox    (default: 10.11.12.46)
+#   LANDING_LXC_ID    — ID do LXC da landing page (default: 214)
 #   LANDING_PORT      — Porta do nginx da landing  (default: 8080)
 #   SSH_KEY           — Caminho da chave SSH       (default: ~/.ssh/id_ed25519)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PROXMOX_HOST="${PROXMOX_HOST:?'Defina PROXMOX_HOST (ex: export PROXMOX_HOST=192.168.1.100)'}"
+PROXMOX_HOST="${PROXMOX_HOST:-10.11.12.46}"
 PROXMOX_USER="${PROXMOX_USER:-root}"
 SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_ed25519}"
-LXC_ID="${LANDING_LXC_ID:?'Defina LANDING_LXC_ID (ex: export LANDING_LXC_ID=214)'}"
+LXC_ID="${LANDING_LXC_ID:-214}"
 LANDING_SRC="$(cd "$(dirname "$0")/.." && pwd)/docs/landing/index.html"
 # Diretório real que o nginx do LXC já serve
 LANDING_DEST_DIR="/var/www/cortex-context"
 LANDING_DEST="${LANDING_DEST_DIR}/index.html"
 PORT="${LANDING_PORT:-8080}"
-HEALTH_URL="${LANDING_HEALTH_URL:-http://localhost:${PORT}/}"
 HEALTH_RETRIES=12
-HEALTH_WAIT=3
+HEALTH_WAIT=2
 DRY_RUN=false
 
 # ── Args ──────────────────────────────────────────────────────────────────────
@@ -78,7 +77,6 @@ if $DRY_RUN; then
   log  "Fonte    : ${LANDING_SRC}"
   log  "Destino  : ${LANDING_DEST}"
   log  "Porta    : ${PORT}"
-  log  "Health   : ${HEALTH_URL}"
   exit 0
 fi
 
@@ -94,7 +92,7 @@ if ! ssh_proxmox "echo ok" &>/dev/null; then
   err "Não foi possível acessar ${PROXMOX_HOST}. Verifique a chave SSH e a conectividade."
   exit 1
 fi
-ok "Proxmox acessível"
+ok "Proxmox acessível (${PROXMOX_HOST})"
 
 log "Verificando LXC ${LXC_ID}…"
 LXC_STATUS=$(ssh_proxmox "pct status ${LXC_ID} 2>&1")
@@ -103,6 +101,13 @@ if [[ "$LXC_STATUS" != *"running"* ]]; then
   exit 1
 fi
 ok "LXC ${LXC_ID} está running"
+
+# Descobre o IP do LXC
+LXC_IP=$(ssh_proxmox "pct exec ${LXC_ID} -- ip -4 addr show eth0 2>/dev/null" | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1 || echo "")
+if [[ -z "$LXC_IP" ]]; then
+  LXC_IP="10.11.12.31"
+fi
+HEALTH_URL="${LANDING_HEALTH_URL:-http://${LXC_IP}:${PORT}/}"
 
 # ── Copia o arquivo ───────────────────────────────────────────────────────────
 log "Copiando landing page para ${LANDING_DEST}…"

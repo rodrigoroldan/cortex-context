@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cortex Context — Product Knowledge Graph for AI Agents</title>
+    <title>Cortex Context — Context Store & Knowledge Graph for AI-DLC</title>
     <meta
       name="description"
-      content="GraphRAG + Vector RAG for AI coding agents. Give your Copilot deep product context with the I.S.I.R ontology."
+      content="Context Store for the AI Development Lifecycle (AI-DLC). AST CodeGraph, Shadow Graph, and GraphRAG for AI coding agents."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -24,17 +24,19 @@
       }
       :root {
         --bg: #000;
-        --bg-card: #111;
-        --bg-card-hover: #161616;
+        --bg-card: #0d0d0e;
+        --bg-card-hover: #141416;
         --border: rgba(255, 255, 255, 0.08);
-        --border-hover: rgba(255, 255, 255, 0.15);
+        --border-hover: rgba(255, 255, 255, 0.16);
         --text-primary: #ededed;
         --text-secondary: #a1a1aa;
-        --text-muted: #52525b;
-        --accent-blue: #2563eb;
-        --accent-purple: #7c3aed;
-        --accent-green: #10b981;
-        --font: "Geist", -apple-system, sans-serif;
+        --text-muted: #71717a;
+        --accent-blue: #3b82f6;
+        --accent-purple: #8b5cf6;
+        --accent-emerald: #10b981;
+        --accent-amber: #f59e0b;
+        --accent-cyan: #06b6d4;
+        --font: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         --mono: "Geist Mono", "Fira Code", monospace;
       }
       html {
@@ -82,7 +84,7 @@
         justify-content: space-between;
         padding: 0 32px;
         height: 64px;
-        background: rgba(0, 0, 0, 0.75);
+        background: rgba(0, 0, 0, 0.8);
         backdrop-filter: blur(16px) saturate(180%);
         border-bottom: 1px solid var(--border);
       }
@@ -167,16 +169,17 @@
       }
       .hero-glow {
         position: absolute;
-        top: -20%;
+        top: -15%;
         left: 50%;
         transform: translateX(-50%);
-        width: 900px;
-        height: 600px;
+        width: 1000px;
+        height: 650px;
         background: radial-gradient(
           ellipse at top,
-          rgba(37, 99, 235, 0.18) 0%,
-          rgba(124, 58, 237, 0.1) 40%,
-          transparent 70%
+          rgba(59, 130, 246, 0.22) 0%,
+          rgba(139, 92, 246, 0.15) 35%,
+          rgba(16, 185, 129, 0.05) 60%,
+          transparent 75%
         );
         pointer-events: none;
       }
@@ -184,7 +187,7 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        padding: 5px 14px 5px 8px;
+        padding: 6px 16px;
         border: 1px solid var(--border);
         border-radius: 99px;
         font-size: 12px;
@@ -197,8 +200,8 @@
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: var(--accent-green);
-        box-shadow: 0 0 6px var(--accent-green);
+        background: var(--accent-emerald);
+        box-shadow: 0 0 6px var(--accent-emerald);
         animation: pulse 2s infinite;
       }
       @keyframes pulse {
@@ -213,23 +216,23 @@
       .hero-eyebrow {
         font-size: 13px;
         font-weight: 600;
-        letter-spacing: 0.1em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: var(--text-muted);
+        color: var(--accent-cyan);
         margin-bottom: 14px;
       }
       .hero h1 {
-        font-size: clamp(60px, 9vw, 108px);
+        font-size: clamp(52px, 8.5vw, 96px);
         font-weight: 800;
-        letter-spacing: -0.05em;
-        line-height: 1;
-        margin-bottom: 16px;
+        letter-spacing: -0.04em;
+        line-height: 1.05;
+        margin-bottom: 20px;
       }
       .hero h1 .gradient {
         background: linear-gradient(
           135deg,
           #60a5fa 0%,
-          #a78bfa 50%,
+          #c084fc 40%,
           #34d399 100%
         );
         -webkit-background-clip: text;
@@ -237,28 +240,24 @@
         background-clip: text;
       }
       .hero-tagline {
-        font-size: clamp(15px, 1.8vw, 18px);
+        font-size: clamp(16px, 1.9vw, 19px);
         color: var(--text-secondary);
-        max-width: 500px;
+        max-width: 680px;
         line-height: 1.7;
         margin-bottom: 36px;
       }
       .hero-actions {
         display: flex;
-        gap: 12px;
+        gap: 14px;
         flex-wrap: wrap;
         justify-content: center;
-        margin-bottom: 60px;
       }
       .btn-hero-primary {
-        font-family: var(--font);
         font-size: 15px;
-        font-weight: 500;
-        background: var(--text-primary);
+        font-weight: 600;
+        background: #fff;
         color: #000;
-        border: none;
-        cursor: pointer;
-        padding: 11px 24px;
+        padding: 12px 26px;
         border-radius: 8px;
         text-decoration: none;
         transition:
@@ -266,43 +265,42 @@
           transform 0.1s;
       }
       .btn-hero-primary:hover {
-        background: #d4d4d8;
+        background: #e4e4e7;
         transform: translateY(-2px);
       }
       .btn-hero-secondary {
-        font-family: var(--font);
         font-size: 15px;
         font-weight: 500;
-        background: transparent;
+        background: rgba(255, 255, 255, 0.05);
         color: var(--text-primary);
         border: 1px solid var(--border);
-        cursor: pointer;
-        padding: 11px 24px;
+        padding: 12px 24px;
         border-radius: 8px;
         text-decoration: none;
         transition:
-          border-color 0.15s,
           background 0.15s,
+          border-color 0.15s,
           transform 0.1s;
       }
       .btn-hero-secondary:hover {
+        background: rgba(255, 255, 255, 0.09);
         border-color: var(--border-hover);
-        background: rgba(255, 255, 255, 0.03);
         transform: translateY(-2px);
       }
 
-      /* CODE PREVIEW */
+      /* TERMINAL CODE PREVIEW */
       .code-preview {
+        max-width: 860px;
         width: 100%;
-        max-width: 620px;
-        background: #0d0d0d;
+        margin-top: 48px;
+        background: #08080a;
         border: 1px solid var(--border);
         border-radius: 12px;
         overflow: hidden;
         text-align: left;
         box-shadow:
           0 0 0 1px rgba(255, 255, 255, 0.04),
-          0 32px 64px rgba(0, 0, 0, 0.5);
+          0 32px 64px rgba(0, 0, 0, 0.6);
       }
       .code-bar {
         display: flex;
@@ -310,7 +308,7 @@
         gap: 6px;
         padding: 12px 16px;
         border-bottom: 1px solid var(--border);
-        background: #080808;
+        background: #0d0d10;
       }
       .code-dot {
         width: 12px;
@@ -318,13 +316,13 @@
         border-radius: 50%;
       }
       .code-dot.red {
-        background: #ff5f57;
+        background: #ef4444;
       }
       .code-dot.yellow {
-        background: #febc2e;
+        background: #f59e0b;
       }
       .code-dot.green {
-        background: #28c840;
+        background: #10b981;
       }
       .code-label {
         margin-left: 8px;
@@ -333,10 +331,10 @@
         color: var(--text-muted);
       }
       .code-content {
-        padding: 20px 24px;
+        padding: 22px 26px;
         font-family: var(--mono);
         font-size: 13px;
-        line-height: 1.8;
+        line-height: 1.85;
         overflow-x: auto;
       }
       .c-comment {
@@ -346,16 +344,16 @@
         color: #60a5fa;
       }
       .c-str {
-        color: #a3e635;
+        color: #34d399;
       }
       .c-punct {
         color: #71717a;
       }
-      .c-num {
-        color: #fb923c;
-      }
       .c-tag {
         color: #c084fc;
+      }
+      .c-warn {
+        color: #fbbf24;
       }
 
       /* COMMON */
@@ -364,42 +362,42 @@
         z-index: 1;
       }
       .section-inner {
-        max-width: 1080px;
+        max-width: 1120px;
         margin: 0 auto;
-        padding: 88px 24px;
+        padding: 96px 24px;
       }
       .section-label {
         font-size: 12px;
         font-weight: 600;
-        letter-spacing: 0.1em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--accent-blue);
-        margin-bottom: 14px;
+        margin-bottom: 12px;
       }
       .section-title {
-        font-size: clamp(26px, 3.5vw, 42px);
+        font-size: clamp(28px, 4vw, 44px);
         font-weight: 800;
         letter-spacing: -0.03em;
-        line-height: 1.1;
-        margin-bottom: 14px;
+        line-height: 1.15;
+        margin-bottom: 16px;
       }
       .section-sub {
         font-size: 16px;
         color: var(--text-secondary);
-        max-width: 500px;
+        max-width: 620px;
         line-height: 1.7;
-        margin-bottom: 48px;
+        margin-bottom: 52px;
       }
       .sep {
         height: 1px;
         background: linear-gradient(
           90deg,
           transparent,
-          var(--border) 30%,
-          var(--border) 70%,
+          var(--border) 25%,
+          var(--border) 75%,
           transparent
         );
-        max-width: 1080px;
+        max-width: 1120px;
         margin: 0 auto;
       }
 
@@ -413,24 +411,24 @@
         border-radius: 12px;
         overflow: hidden;
       }
-      @media (max-width: 640px) {
+      @media (max-width: 768px) {
         .stats-grid {
           grid-template-columns: repeat(2, 1fr);
         }
       }
       .stat-item {
         background: var(--bg);
-        padding: 28px 24px;
+        padding: 30px 24px;
         text-align: center;
       }
       .stat-num {
-        font-size: 34px;
+        font-size: 36px;
         font-weight: 800;
         letter-spacing: -0.04em;
         background: linear-gradient(
           135deg,
-          var(--text-primary),
-          var(--text-secondary)
+          #ffffff,
+          #9ca3af
         );
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -439,13 +437,84 @@
       .stat-label {
         font-size: 12px;
         color: var(--text-muted);
-        margin-top: 4px;
+        margin-top: 6px;
+        font-weight: 500;
+      }
+
+      /* ARCHITECTURE 80/20 SECTION */
+      .arch-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        margin-bottom: 48px;
+      }
+      @media (max-width: 860px) {
+        .arch-container {
+          grid-template-columns: 1fr;
+        }
+      }
+      .arch-box {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 32px 28px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .arch-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+      }
+      .arch-badge.det {
+        background: rgba(16, 185, 129, 0.15);
+        color: var(--accent-emerald);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+      .arch-badge.cog {
+        background: rgba(139, 92, 246, 0.15);
+        color: var(--accent-purple);
+        border: 1px solid rgba(139, 92, 246, 0.3);
+      }
+      .arch-title {
+        font-size: 20px;
+        font-weight: 700;
+        margin-bottom: 10px;
+        letter-spacing: -0.02em;
+      }
+      .arch-desc {
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.65;
+        margin-bottom: 20px;
+      }
+      .arch-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .arch-list li {
+        font-size: 13px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .arch-list li span {
+        color: var(--accent-emerald);
       }
 
       /* ISIR */
       .isir-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
         gap: 1px;
         background: var(--border);
         border: 1px solid var(--border);
@@ -461,8 +530,8 @@
         background: var(--bg-card-hover);
       }
       .isir-icon {
-        width: 38px;
-        height: 38px;
+        width: 40px;
+        height: 40px;
         border-radius: 10px;
         display: flex;
         align-items: center;
@@ -471,16 +540,16 @@
         margin-bottom: 14px;
       }
       .isir-card:nth-child(1) .isir-icon {
-        background: rgba(37, 99, 235, 0.15);
+        background: rgba(59, 130, 246, 0.15);
       }
       .isir-card:nth-child(2) .isir-icon {
-        background: rgba(124, 58, 237, 0.15);
+        background: rgba(139, 92, 246, 0.15);
       }
       .isir-card:nth-child(3) .isir-icon {
         background: rgba(16, 185, 129, 0.15);
       }
       .isir-card:nth-child(4) .isir-icon {
-        background: rgba(249, 115, 22, 0.15);
+        background: rgba(245, 158, 11, 0.15);
       }
       .isir-pillar {
         font-size: 11px;
@@ -494,7 +563,7 @@
         font-size: 18px;
         font-weight: 700;
         letter-spacing: -0.02em;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
       }
       .isir-question {
         font-size: 12px;
@@ -523,10 +592,51 @@
         color: var(--text-muted);
       }
 
+      /* CODEGRAPH AST & SHADOW GRAPH SHOWCASE */
+      .superpowers-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        margin-top: 40px;
+      }
+      @media (max-width: 860px) {
+        .superpowers-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .superpower-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 28px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .superpower-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .superpower-icon {
+        font-size: 24px;
+      }
+      .superpower-title {
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .superpower-desc {
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.65;
+        margin-bottom: 20px;
+      }
+
       /* FEATURES */
       .features-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         gap: 1px;
         background: var(--border);
         border: 1px solid var(--border);
@@ -542,25 +652,25 @@
         background: var(--bg-card-hover);
       }
       .feature-icon {
-        width: 40px;
-        height: 40px;
+        width: 42px;
+        height: 42px;
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.04);
         border: 1px solid var(--border);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
-        margin-bottom: 16px;
+        font-size: 20px;
+        margin-bottom: 18px;
       }
       .feature-title {
-        font-size: 16px;
+        font-size: 17px;
         font-weight: 700;
         letter-spacing: -0.02em;
         margin-bottom: 8px;
       }
       .feature-desc {
-        font-size: 13px;
+        font-size: 13.5px;
         color: var(--text-muted);
         line-height: 1.7;
       }
@@ -572,7 +682,7 @@
         gap: 32px;
         align-items: start;
       }
-      @media (max-width: 768px) {
+      @media (max-width: 860px) {
         .cli-grid {
           grid-template-columns: 1fr;
         }
@@ -580,7 +690,7 @@
       .cli-commands {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 10px;
       }
       .cli-row {
         display: flex;
@@ -600,8 +710,9 @@
       }
       .cli-cmd {
         font-family: var(--mono);
-        font-size: 12.5px;
-        color: var(--accent-green);
+        font-size: 13px;
+        color: var(--accent-emerald);
+        font-weight: 600;
       }
       .cli-desc {
         font-size: 13px;
@@ -611,7 +722,7 @@
 
       /* QUERY CARD */
       .query-card {
-        background: #080808;
+        background: #08080a;
         border: 1px solid var(--border);
         border-radius: 12px;
         overflow: hidden;
@@ -678,21 +789,21 @@
         bottom: -50%;
         left: 50%;
         transform: translateX(-50%);
-        width: 700px;
-        height: 400px;
+        width: 750px;
+        height: 450px;
         background: radial-gradient(
           ellipse at bottom,
-          rgba(124, 58, 237, 0.2) 0%,
+          rgba(139, 92, 246, 0.22) 0%,
           transparent 70%
         );
         pointer-events: none;
       }
       .cta-title {
-        font-size: clamp(32px, 5vw, 58px);
+        font-size: clamp(34px, 5vw, 60px);
         font-weight: 800;
         letter-spacing: -0.04em;
         line-height: 1.05;
-        margin-bottom: 16px;
+        margin-bottom: 18px;
       }
       .cta-sub {
         font-size: 17px;
@@ -701,7 +812,7 @@
       }
       .cta-actions {
         display: flex;
-        gap: 12px;
+        gap: 14px;
         flex-wrap: wrap;
         justify-content: center;
       }
@@ -709,10 +820,10 @@
       /* FOOTER */
       footer {
         border-top: 1px solid var(--border);
-        padding: 36px 32px;
+        padding: 40px 32px;
       }
       .footer-inner {
-        max-width: 1080px;
+        max-width: 1120px;
         margin: 0 auto;
         display: flex;
         align-items: center;
@@ -744,33 +855,6 @@
       .footer-copy {
         font-size: 13px;
         color: var(--text-muted);
-      }
-
-      .btn-disabled {
-        opacity: 0.4;
-        cursor: not-allowed !important;
-        pointer-events: none;
-        filter: grayscale(0.4);
-      }
-      .soon-badge {
-        display: inline-flex;
-        align-items: center;
-        font-size: 10px;
-        font-weight: 600;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 4px;
-        padding: 1px 6px;
-        margin-left: 6px;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        vertical-align: middle;
-      }
-      .footer-links .soon-text {
-        font-size: 13px;
-        color: var(--text-muted);
-        opacity: 0.4;
-        cursor: not-allowed;
       }
 
       @media (max-width: 600px) {
@@ -869,10 +953,12 @@
         Cortex Context
       </a>
       <div class="nav-links">
+        <a href="#context-store">Context Store</a>
+        <a href="#codegraph">CodeGraph AST</a>
         <a href="#ontology">Ontology</a>
         <a href="#cli">CLI</a>
         <a href="#features">Features</a>
-        <a href="https://github.com/rodrigoroldan/cortex-context">Docs</a>
+        <a href="https://github.com/rodrigoroldan/cortex-context" target="_blank">Docs</a>
       </div>
       <div class="nav-cta">
         <a
@@ -898,26 +984,25 @@
 
       <div class="badge fade-up">
         <span class="badge-dot"></span>
-        v0.0.1 CLI &middot; v1 Graph + Vector RAG &middot; MCP-native
+        v0.1.0 CLI &middot; Context Store for AI-DLC &middot; AST CodeGraph &middot; Shadow Graph
       </div>
       <p class="hero-eyebrow fade-up d1">
-        Product Knowledge Graph for AI Agents
+        Context Store &amp; Knowledge Graph for AI Agents
       </p>
       <h1 class="fade-up d2"><span class="gradient">Cortex Context</span></h1>
       <p class="hero-tagline fade-up d3">
-        Give GitHub Copilot and any AI coding agent deep, structured
-        understanding of your product — specs, services, decisions and workflows
-        — in a queryable graph.
+        The Context Store backbone for the AI Development Lifecycle (AI-DLC). 
+        Eliminate context drift, resolve blast-radius in 1 hop, and power GitHub Copilot, Claude &amp; Antigravity with a hybrid Graph + Vector RAG memory.
       </p>
 
       <div class="hero-actions fade-up d4" style="margin-bottom: 16px">
         <a
-          href="https://www.npmjs.com/package/@cortex-context/cli"
+          href="https://github.com/rodrigoroldan/cli-cortex-context/releases/tag/v0.1.0"
           target="_blank"
           class="btn-hero-primary"
-          >Install on npm ↗</a
+          >Get v0.1.0 Release ↗</a
         >
-        <a href="#ontology" class="btn-hero-secondary">See how it works</a>
+        <a href="#context-store" class="btn-hero-secondary">Explore the Architecture</a>
       </div>
       <p
         class="fade-up d4"
@@ -929,51 +1014,29 @@
           letter-spacing: 0.01em;
         "
       >
-        npx @cortex-context/cli@latest init
+        npx @cortex-context/cli init
       </p>
 
       <div class="code-preview fade-up d4">
         <div class="code-bar">
           <span class="code-dot red"></span><span class="code-dot yellow"></span
           ><span class="code-dot green"></span>
-          <span class="code-label">Terminal</span>
+          <span class="code-label">Terminal — Blast Radius &amp; CodeGraph Ingestion</span>
         </div>
         <div class="code-content">
-          <span class="c-punct">$</span> <span class="c-tag">npx</span>
-          <span class="c-key">@cortex-context/cli@latest</span>
-          <span class="c-str">init</span><br /><br /><span
-            style="color: #52525b"
-          >
-            ◆ Phase 1 Environment</span
-          ><br /><span class="c-key"> ✓ .env</span>
-          <span class="c-str">CORTEX_URL=http://localhost:8082</span><br /><span
-            class="c-key"
-          >
-            ✓ cortex.config.yaml</span
-          >
-          <span class="c-str">ejected</span><br /><span class="c-key">
-            ✓ docker compose up</span
-          >
-          <span class="c-comment">Neo4j + Cortex API</span><br /><br /><span
-            style="color: #52525b"
-          >
-            ◆ Phase 2 MCP + Rules</span
-          ><br /><span class="c-key"> ✓ copilot-instructions</span>
-          <span class="c-str">Cortex block injected</span><br /><span
-            class="c-key"
-          >
-            ✓ .vscode/mcp.json</span
-          >
-          <span class="c-str">configured</span><br /><br /><span
-            style="color: #52525b"
-          >
-            ◆ Phase 3 Git hook</span
-          ><br /><span class="c-key"> ✓ .git/hooks/post-commit</span>
-          <span class="c-str">auto-sync installed</span><br /><br /><span
-            class="c-comment"
-          >
-            Done in 6.1s → cortex-context doctor</span
-          >
+          <span class="c-punct">$</span> <span class="c-tag">cortex-context</span>
+          <span class="c-key">blast-radius</span>
+          <span class="c-str">--symbol processPayment</span>
+          <span class="c-comment">--domain payments</span><br /><br />
+          <span class="c-str">🕸️ AST Graph Traversal: Symbol "processPayment" [Function]</span><br />
+          <span class="c-key"> ├─ Declared in:</span> <span class="c-str">src/services/payment.ts:42</span><br />
+          <span class="c-key"> ├─ Direct Callers (3):</span><br />
+          <span class="c-comment"> │   • CheckoutController.submitOrder (src/controllers/checkout.ts:108)</span><br />
+          <span class="c-comment"> │   • SubscriptionWorker.renew (src/workers/sub.ts:54)</span><br />
+          <span class="c-comment"> │   • WebhookHandler.retry (src/api/webhook.ts:89)</span><br />
+          <span class="c-key"> ├─ Impacted Specs:</span> <span class="c-warn">spec-042 (Instant Checkout Flow)</span>, <span class="c-warn">spec-089 (Idempotent Webhooks)</span><br />
+          <span class="c-key"> └─ Connected Services:</span> <span class="c-str">PaymentGateway</span>, <span class="c-str">AuditLog</span><br /><br />
+          <span class="c-comment">✓ Retrieved in 4.2ms via 1 Neo4j Graph traversal (Replaced 8 file searches &amp; 14k tokens)</span>
         </div>
       </div>
     </section>
@@ -983,93 +1046,190 @@
     <div class="section-inner" style="padding-top: 56px; padding-bottom: 56px">
       <div class="stats-grid">
         <div class="stat-item">
-          <div class="stat-num">4</div>
-          <div class="stat-label">I.S.I.R pillars</div>
+          <div class="stat-num">80 / 20</div>
+          <div class="stat-label">Deterministic vs Cognitive</div>
         </div>
         <div class="stat-item">
-          <div class="stat-num">145+</div>
-          <div class="stat-label">Nodes in the graph</div>
+          <div class="stat-num">1 Query</div>
+          <div class="stat-label">Full AST Call Hierarchy</div>
         </div>
         <div class="stat-item">
-          <div class="stat-num">6</div>
-          <div class="stat-label">MCP tools built-in</div>
+          <div class="stat-num">10 MCP</div>
+          <div class="stat-label">Tools (Blast Radius, Shadow Graph)</div>
         </div>
         <div class="stat-item">
           <div class="stat-num">100%</div>
-          <div class="stat-label">Local &amp; private</div>
+          <div class="stat-label">Local &amp; Multi-Tenant Isolated</div>
         </div>
       </div>
     </div>
     <div class="sep"></div>
 
+    <!-- CONTEXT STORE ARCHITECTURE -->
+    <section id="context-store">
+      <div class="section-inner">
+        <div class="section-label">Philosophy</div>
+        <h2 class="section-title">The Context Store Paradigm</h2>
+        <p class="section-sub">
+          Maintaining knowledge for AI agents should not depend on fragile manual prompts.
+          Cortex Context follows an <strong>80% Deterministic / 20% Cognitive</strong> architecture to ensure high-fidelity context at zero maintenance cost.
+        </p>
+
+        <div class="arch-container">
+          <div class="arch-box">
+            <div>
+              <span class="arch-badge det">80% Deterministic Engine</span>
+              <h3 class="arch-title">Automated AST &amp; Metadata Ingestion</h3>
+              <p class="arch-desc">
+                AST parsers analyze code structure on every commit. Backstage service catalogs, ADR manifests, and git diffs are deterministically ingested without AI hallucination.
+              </p>
+            </div>
+            <ul class="arch-list">
+              <li><span>✓</span> Tree-sitter / Babel AST call &amp; dependency graphs</li>
+              <li><span>✓</span> Backstage catalog-info.yaml service ingestion</li>
+              <li><span>✓</span> Automated post-commit hooks &amp; branch tracking</li>
+              <li><span>✓</span> Zero token cost during codebase mapping</li>
+            </ul>
+          </div>
+
+          <div class="arch-box">
+            <div>
+              <span class="arch-badge cog">20% Cognitive Intelligence</span>
+              <h3 class="arch-title">Semantic Synthesis &amp; Shadow Graph</h3>
+              <p class="arch-desc">
+                AI agents focus exclusively on high-value cognitive tasks: synthesizing architectural intent, speculative draft exploration, and domain term clarification.
+              </p>
+            </div>
+            <ul class="arch-list">
+              <li><span>✓</span> Shadow Graph for speculative branch experiments</li>
+              <li><span>✓</span> Ubiquitous language glossary (:CONCEPT dimension)</li>
+              <li><span>✓</span> Hybrid Vector + Graph semantic retrieval</li>
+              <li><span>✓</span> Automated spec creation &amp; validation rules</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
+    <!-- CODEGRAPH AST SHOWCASE -->
+    <section id="codegraph">
+      <div class="section-inner">
+        <div class="section-label">CodeGraph AST Superpowers</div>
+        <h2 class="section-title">Instant Call Graphs &amp; Blast Radius</h2>
+        <p class="section-sub">
+          Instead of having LLMs read 10 files sequentially to deduce callers and dependencies, Cortex queries the AST graph in 1 lightweight request.
+        </p>
+
+        <div class="superpowers-grid">
+          <div class="superpower-card">
+            <div class="superpower-header">
+              <span class="superpower-icon">⚡</span>
+              <span class="superpower-title">AST CodeGraph Traversal</span>
+            </div>
+            <p class="superpower-desc">
+              Deterministic parsing creates <code style="font-family: var(--mono)">[:CALLS]</code>, <code style="font-family: var(--mono)">[:IMPORTS]</code>, <code style="font-family: var(--mono)">[:EXTENDS]</code>, and <code style="font-family: var(--mono)">[:DEFINES]</code> relationships directly in Neo4j.
+            </p>
+            <div class="query-card">
+              <div class="query-header">MCP Tool: blast-radius</div>
+              <div class="query-body">
+                <span class="c-tag">mcp</span>.<span class="c-key">blast-radius</span>({<br />
+                &nbsp;&nbsp;<span class="c-str">symbol</span>: <span class="c-warn">"AuthService.validateSession"</span>,<br />
+                &nbsp;&nbsp;<span class="c-str">domain_id</span>: <span class="c-warn">"security"</span>,<br />
+                &nbsp;&nbsp;<span class="c-str">hops</span>: 2<br />
+                })
+              </div>
+            </div>
+          </div>
+
+          <div class="superpower-card">
+            <div class="superpower-header">
+              <span class="superpower-icon">🌘</span>
+              <span class="superpower-title">Shadow Graph &amp; Speculative Drafts</span>
+            </div>
+            <p class="superpower-desc">
+              Test refactors and feature branches in an isolated shadow state. Querying with your branch parameter returns a merged view of canonical main + speculative draft overrides.
+            </p>
+            <div class="query-card">
+              <div class="query-header">CLI: Speculative Sync</div>
+              <div class="query-body">
+                <span class="c-punct">$</span> <span class="c-tag">cortex-context</span> <span class="c-key">sync</span> \<br />
+                &nbsp;&nbsp;<span class="c-str">--branch</span> feature/spec-092-async-audit \<br />
+                &nbsp;&nbsp;<span class="c-str">--draft</span><br />
+                <span class="c-comment"># ✅ Shadow nodes created with 0 canonical mutation</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sep"></div>
+
     <!-- ONTOLOGY -->
     <section id="ontology">
       <div class="section-inner">
-        <div class="section-label">I.S.I.R Ontology</div>
-        <h2 class="section-title">Four pillars. Complete context.</h2>
+        <div class="section-label">Expanded Ontology</div>
+        <h2 class="section-title">The Complete AI-DLC Knowledge Model</h2>
         <p class="section-sub">
-          Every piece of product knowledge maps to one of four universal
-          concepts, giving AI agents a structured map of your entire codebase.
+          Every piece of product, architecture, and code knowledge maps into an interconnected multi-dimensional graph.
         </p>
         <div class="isir-grid">
           <div class="isir-card">
             <div class="isir-icon">🎯</div>
             <div class="isir-pillar">Pillar 1</div>
-            <div class="isir-name" style="color: #60a5fa">Intent</div>
-            <div class="isir-question">The "Why"</div>
+            <div class="isir-name" style="color: #60a5fa">Intent &amp; Concepts</div>
+            <div class="isir-question">The "Why" &amp; Glossary</div>
             <div class="isir-desc">
-              Specs, requirements and user stories that explain the purpose
-              behind every feature.
+              Product specs, user stories, and ubiquitous enterprise terminology (:CONCEPT).
             </div>
             <div class="isir-examples">
-              <span class="isir-tag">:Spec</span
-              ><span class="isir-tag">:UserStory</span
-              ><span class="isir-tag">:Epic</span>
+              <span class="isir-tag">:Spec</span>
+              <span class="isir-tag">:UserStory</span>
+              <span class="isir-tag">:Concept</span>
             </div>
           </div>
           <div class="isir-card">
             <div class="isir-icon">🏗️</div>
             <div class="isir-pillar">Pillar 2</div>
-            <div class="isir-name" style="color: #a78bfa">System</div>
-            <div class="isir-question">The "How"</div>
+            <div class="isir-name" style="color: #a78bfa">System &amp; Catalogs</div>
+            <div class="isir-question">The "How" &amp; Architecture</div>
             <div class="isir-desc">
-              Services, ADRs and APIs that form the structural skeleton of your
-              product.
+              Services, Backstage catalog entities, ADRs and APIs forming the system skeleton.
             </div>
             <div class="isir-examples">
-              <span class="isir-tag">:Service</span
-              ><span class="isir-tag">:ADR</span
-              ><span class="isir-tag">:API</span>
+              <span class="isir-tag">:Service</span>
+              <span class="isir-tag">:ADR</span>
+              <span class="isir-tag">:API</span>
             </div>
           </div>
           <div class="isir-card">
             <div class="isir-icon">⚙️</div>
             <div class="isir-pillar">Pillar 3</div>
-            <div class="isir-name" style="color: #34d399">Implementation</div>
-            <div class="isir-question">The "What"</div>
+            <div class="isir-name" style="color: #34d399">Implementation &amp; AST</div>
+            <div class="isir-question">The "What" &amp; Code</div>
             <div class="isir-desc">
-              Modules, workflows and components — the concrete building blocks
-              that make it run.
+              Classes, functions, modules, workflows and AST call hierarchies.
             </div>
             <div class="isir-examples">
-              <span class="isir-tag">:Workflow</span
-              ><span class="isir-tag">:Module</span
-              ><span class="isir-tag">:Component</span>
+              <span class="isir-tag">:Function</span>
+              <span class="isir-tag">:Module</span>
+              <span class="isir-tag">:Commit</span>
             </div>
           </div>
           <div class="isir-card">
             <div class="isir-icon">📡</div>
             <div class="isir-pillar">Pillar 4</div>
-            <div class="isir-name" style="color: #fb923c">Runtime</div>
-            <div class="isir-question">The "Real world"</div>
+            <div class="isir-name" style="color: #fb923c">Runtime &amp; History</div>
+            <div class="isir-question">The "Real World"</div>
             <div class="isir-desc">
-              Alerts, deployments and incidents that ground AI responses in
-              what's actually happening.
+              Deployments, alerts, incidents and historical evolution trails (:IMPLEMENTATION_HISTORY).
             </div>
             <div class="isir-examples">
-              <span class="isir-tag">:Alert</span
-              ><span class="isir-tag">:Deployment</span
-              ><span class="isir-tag">:Incident</span>
+              <span class="isir-tag">:Deployment</span>
+              <span class="isir-tag">:Incident</span>
+              <span class="isir-tag">:History</span>
             </div>
           </div>
         </div>
@@ -1081,19 +1241,17 @@
     <!-- CLI -->
     <section id="cli">
       <div class="section-inner">
-        <div class="section-label">CLI</div>
+        <div class="section-label">CLI &amp; Tooling</div>
         <h2 class="section-title">One command. Full setup.</h2>
         <p class="section-sub">
-          A TypeScript CLI that wires your workspace to the knowledge graph in
-          three phases: local Docker stack, MCP server config, and a git hook
-          for automatic sync on every commit.
+          A TypeScript CLI that wires your workspace to the knowledge graph in three phases: local Docker stack, MCP server configuration, and branch-aware post-commit git hooks.
         </p>
         <div
           style="
             display: inline-flex;
             align-items: center;
             gap: 10px;
-            background: #0d0d0d;
+            background: #0d0d10;
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 10px 18px;
@@ -1104,10 +1262,10 @@
         >
           <span class="c-punct">$</span>
           <span class="c-tag">npx</span>
-          <span class="c-key">@cortex-context/cli@latest</span>
+          <span class="c-key">@cortex-context/cli</span>
           <span class="c-str">init</span>
           <a
-            href="https://www.npmjs.com/package/@cortex-context/cli"
+            href="https://github.com/rodrigoroldan/cli-cortex-context/releases/tag/v0.1.0"
             target="_blank"
             style="
               margin-left: 12px;
@@ -1120,7 +1278,7 @@
               letter-spacing: 0.04em;
               font-family: var(--font);
             "
-            >npm ↗</a
+            >Release v0.1.0 ↗</a
           >
         </div>
         <div class="cli-grid">
@@ -1128,92 +1286,38 @@
             <div class="cli-row">
               <span class="cli-cmd">cortex-context init</span>
               <span class="cli-desc"
-                >3-phase setup: local Docker stack + MCP server (Copilot /
-                Claude) + post-commit git hook. Run once per workspace.</span
+                >Complete 3-phase setup: Docker stack, MCP server for Copilot/Claude/Antigravity, and automated git hooks.</span
               >
             </div>
             <div class="cli-row">
-              <span class="cli-cmd">cortex-context sync</span>
+              <span class="cli-cmd">cortex-context sync [--branch] [--draft]</span>
               <span class="cli-desc"
-                >Reads
-                <code style="font-family: var(--mono)">git diff HEAD~1</code>,
-                auto-extracts
-                <code style="font-family: var(--mono)">spec_ref</code> from the
-                branch name, and ingests the diff into the graph. Called
-                automatically by the hook.</span
+                >Extracts AST symbols, diffs, and spec refs. Supports branch-isolated speculative draft ingestion into the Shadow Graph.</span
               >
             </div>
             <div class="cli-row">
-              <span class="cli-cmd">cortex-context sync --dry-run</span>
+              <span class="cli-cmd">cortex-context blast-radius --symbol &lt;name&gt;</span>
               <span class="cli-desc"
-                >Previews the diff and detected spec_ref without sending to the
-                server. Useful for debugging the hook.</span
-              >
-            </div>
-            <div class="cli-row">
-              <span class="cli-cmd">cortex-context update</span>
-              <span class="cli-desc"
-                >Updates Skills and the MCP Server bundle in your workspace to
-                the latest published version.</span
+                >Performs multi-hop AST graph traversal to determine exactly which files, functions, and specs are impacted by a change.</span
               >
             </div>
             <div class="cli-row">
               <span class="cli-cmd">cortex-context doctor</span>
               <span class="cli-desc"
-                >Checks Cortex connectivity, validates the local install, and
-                reports the hook and MCP server status.</span
+                >Validates Neo4j connectivity, vector embedder, MCP health, and multi-tenant domain isolation.</span
               >
             </div>
           </div>
           <div class="query-card">
-            <div class="query-header"><span>⚡</span> Example output</div>
+            <div class="query-header"><span>⚡</span> MCP Superpowers in Action</div>
             <div class="query-body">
-              <span class="c-punct">$</span>
-              <span class="c-key">cortex-context</span>
-              <span class="c-str">sync --repo .</span>
-
-              <span class="c-comment"> → spec_ref detected: spec-151</span>
-              <span class="c-comment"> ← branch: feature/151-spec150-port</span>
-
-              <span class="c-comment"
-                >✓ Diff captured 32 insertions · 4 files</span
-              >
-              <span class="c-comment"
-                >✓ Ingested in 134ms POST /api/v1/ingest</span
-              >
-              <span class="c-comment">
-                (:Commit)-[:IMPLEMENTS]->(:Spec {id:"spec-151"})</span
-              >
-
-              <span class="c-punct">$</span>
-              <span class="c-key">cortex-context</span>
-              <span class="c-str">doctor</span>
-
-              <span class="c-key"> ✓</span>
-              <span class="c-str">Cortex URL</span>
-              <span class="c-comment">http://10.11.12.200:8082</span><br /><span
-                class="c-key"
-              >
-                ✓</span
-              >
-              <span class="c-str">Neo4j</span>
-              <span class="c-comment">bolt://localhost:7687</span><br /><span
-                class="c-key"
-              >
-                ✓</span
-              >
-              <span class="c-str">Nodes in graph</span>
-              <span style="color: #e5e7eb">150</span>
-              <span class="c-comment">(122 specs · 8 svc · 15 wf)</span
-              ><br /><span class="c-key"> ✓</span>
-              <span class="c-str">Embedder</span>
-              <span class="c-comment">local (sentence-transformers)</span
-              ><br /><span class="c-key"> ✓</span>
-              <span class="c-str">MCP server</span>
-              <span class="c-comment">stdio — GitHub Copilot / Claude</span
-              ><br /><span class="c-key"> ✓</span>
-              <span class="c-str">Git hook</span>
-              <span class="c-comment">post-commit installed</span>
+              <span class="c-comment"># In your AI Chat (Copilot / Claude / Cursor):</span><br /><br />
+              <span class="c-punct">&gt;</span> <span class="c-str">"What is the blast radius if I change BillingService.chargeCustomer?"</span><br /><br />
+              <span class="c-key">→ Calling MCP Tool: blast-radius</span><br />
+              <span class="c-comment">Found 4 direct callers, 2 background workers, and 3 ADRs.</span><br /><br />
+              <span class="c-punct">&gt;</span> <span class="c-str">"Clarify the business term 'GracePeriod' in our billing domain"</span><br /><br />
+              <span class="c-key">→ Calling MCP Tool: clarify_business_term</span><br />
+              <span class="c-comment">Retrieved Concept 'GracePeriod' linked to Spec-084 &amp; InvoiceWorkflow.</span>
             </div>
           </div>
         </div>
@@ -1225,89 +1329,49 @@
     <!-- FEATURES -->
     <section id="features">
       <div class="section-inner">
-        <div class="section-label">Features</div>
-        <h2 class="section-title">Built for the AI-native team</h2>
+        <div class="section-label">Key Capabilities</div>
+        <h2 class="section-title">Engineered for Autonomous AI Teams</h2>
         <div class="features-grid">
           <div class="feature-card">
             <div class="feature-icon">🕸️</div>
-            <div class="feature-title">Graph-first exploration</div>
+            <div class="feature-title">AST-Powered CodeGraph</div>
             <div class="feature-desc">
-              FTS hits trigger 1–2 hop expansions — your agent sees a spec plus
-              everything it impacts: services, decisions, workflows.
+              Deterministic AST symbol mapping captures function calls, class inheritances, and imports into high-speed graph traversals.
             </div>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">🔬</div>
-            <div class="feature-title">Hybrid RAG</div>
+            <div class="feature-icon">🏢</div>
+            <div class="feature-title">Enterprise Multi-Tenancy</div>
             <div class="feature-desc">
-              Combine full-text precision with semantic similarity. Built-in
-              local embeddings or OpenAI for natural-language queries.
+              Strict domain isolation with mandatory <code style="font-family: var(--mono)">domain_id</code> filtering across semantic vector and graph search.
             </div>
           </div>
           <div class="feature-card">
             <div class="feature-icon">🔌</div>
-            <div class="feature-title">MCP-native</div>
+            <div class="feature-title">MCP-Native Architecture</div>
             <div class="feature-desc">
-              Ships with a Model Context Protocol server. GitHub Copilot, Claude
-              Desktop and any MCP agent connects out of the box.
+              Zero-setup integration for GitHub Copilot, Claude Desktop, Antigravity, and Cursor via standard Model Context Protocol.
             </div>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">🧩</div>
-            <div class="feature-title">Plugin dimensions</div>
+            <div class="feature-icon">📦</div>
+            <div class="feature-title">Backstage Deterministic Parser</div>
             <div class="feature-desc">
-              Add GitHub Issues, Confluence or Jira as a single YAML + Python
-              file. No core code changes required.
+              Automatically parses <code style="font-family: var(--mono)">catalog-info.yaml</code> files to build unified service and system catalogs.
             </div>
           </div>
           <div class="feature-card">
             <div class="feature-icon">🔒</div>
-            <div class="feature-title">Fully local</div>
+            <div class="feature-title">100% On-Premise &amp; Local</div>
             <div class="feature-desc">
-              Everything runs on your machine or private server. Your source
-              code never leaves your infrastructure.
-            </div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">📈</div>
-            <div class="feature-title">Impact analysis</div>
-            <div class="feature-desc">
-              Ask "which services are affected by spec-070?" and get a precise
-              answer via 1–2 hop graph traversal — no grep, no guessing.
-            </div>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon">🔗</div>
-            <div class="feature-title">Branch-aware spec tracking</div>
-            <div class="feature-desc">
-              <code style="font-family: var(--mono); font-size: 12px"
-                >sync</code
-              >
-              reads the branch name, extracts the spec ID from the
-              <code style="font-family: var(--mono); font-size: 12px"
-                >feature/NNN-slug</code
-              >
-              convention, and writes a
-              <code style="font-family: var(--mono); font-size: 12px"
-                >(:Commit)-[:IMPLEMENTS]->(:Spec)</code
-              >
-              edge automatically.
+              Runs on your local workstation or private Proxmox LXC/Kubernetes cluster. Source code never leaves your infrastructure.
             </div>
           </div>
           <div class="feature-card">
             <div class="feature-icon">⏱️</div>
-            <div class="feature-title">Bitemporal versioning</div>
+            <div class="feature-title">Bitemporal &amp; History Trails</div>
             <div class="feature-desc">
-              Every node carries
-              <code style="font-family: var(--mono); font-size: 12px"
-                >ingested_at</code
-              >
-              and
-              <code style="font-family: var(--mono); font-size: 12px"
-                >valid_from</code
-              >
-              — know when the data was added <em>and</em> when the spec was
-              written.
+              Every node carries ingested and valid timestamps, enabling time-travel queries across your system's architectural evolution.
             </div>
           </div>
         </div>
@@ -1319,36 +1383,28 @@
     <!-- INTEGRATIONS -->
     <section id="integrations">
       <div class="section-inner" style="text-align: center">
-        <div class="section-label" style="text-align: center">Integrations</div>
+        <div class="section-label" style="text-align: center">Ecosystem</div>
         <h2
           class="section-title"
           style="text-align: center; margin: 0 auto 12px"
         >
-          Works with your stack
+          Seamlessly Connected
         </h2>
         <p class="section-sub" style="margin: 0 auto 44px">
-          Product-agnostic and open. Plug it into the tools your team already
-          uses.
+          Plug Cortex into your developer toolchain and AI coding assistants.
         </p>
         <div class="integrations-row">
           <div class="integration-chip"><span>🤖</span> GitHub Copilot</div>
           <div class="integration-chip"><span>🧠</span> Claude Desktop</div>
-          <div class="integration-chip"><span>⚡</span> VS Code</div>
+          <div class="integration-chip"><span>⚡</span> Google Antigravity</div>
+          <div class="integration-chip"><span>💻</span> VS Code / Cursor</div>
           <div class="integration-chip"><span>🕸️</span> Neo4j</div>
           <div class="integration-chip"><span>🐍</span> FastAPI</div>
-          <div class="integration-chip"><span>🐳</span> Docker</div>
-          <div class="integration-chip"><span>🐙</span> GitHub</div>
-          <div class="integration-chip"><span>📄</span> Markdown / YAML</div>
-          <div class="integration-chip"><span>🔷</span> OpenAI Embeddings</div>
+          <div class="integration-chip"><span>🐳</span> Docker &amp; LXC</div>
+          <div class="integration-chip"><span>📑</span> Backstage Catalogs</div>
+          <div class="integration-chip"><span>🔍</span> blast-radius MCP</div>
+          <div class="integration-chip"><span>📖</span> clarify_business_term</div>
           <div class="integration-chip"><span>📦</span> npm</div>
-          <div class="integration-chip">
-            <span>🔍</span> query_product_context
-          </div>
-          <div class="integration-chip"><span>🔍</span> get_spec_context</div>
-          <div class="integration-chip">
-            <span>🔍</span> get_service_context
-          </div>
-          <div class="integration-chip"><span>📊</span> Any MCP client</div>
         </div>
       </div>
     </section>
@@ -1359,13 +1415,13 @@
     <section id="get-started">
       <div class="section-inner">
         <div class="section-label">Quick Start</div>
-        <h2 class="section-title">Up in 5 minutes</h2>
-        <p class="section-sub">Three commands to a working knowledge graph.</p>
+        <h2 class="section-title">Up and running in 3 steps</h2>
+        <p class="section-sub">Start querying your codebase knowledge in minutes.</p>
         <div
           style="
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 14px;
+            gap: 16px;
             margin-bottom: 48px;
           "
         >
@@ -1385,15 +1441,13 @@
                   font-weight: 700;
                 "
                 >1</span
-              >Install the CLI
+              >Initialize Workspace
             </div>
             <div class="query-body">
               <span class="c-tag">npx</span>
-              <span class="c-key">@cortex-context/cli@latest</span>
-              <span class="c-str">init</span>
-              <span class="c-comment"
-                ># or: npm install -g @cortex-context/cli</span
-              >
+              <span class="c-key">@cortex-context/cli</span>
+              <span class="c-str">init</span><br />
+              <span class="c-comment"># Ejects config, MCP &amp; Docker stack</span>
             </div>
           </div>
           <div class="query-card">
@@ -1412,13 +1466,13 @@
                   font-weight: 700;
                 "
                 >2</span
-              >Start the graph
+              >Start Cortex Stack
             </div>
             <div class="query-body">
               <span class="c-tag">docker</span>
               <span class="c-key">compose</span>
-              <span class="c-str">up -d</span>
-              <span class="c-comment"># Starts Neo4j + Cortex API</span>
+              <span class="c-str">up -d</span><br />
+              <span class="c-comment"># Starts Neo4j + Cortex Context API</span>
             </div>
           </div>
           <div class="query-card">
@@ -1437,21 +1491,14 @@
                   font-weight: 700;
                 "
                 >3</span
-              >Init &amp; sync
+              >Sync &amp; Explore
             </div>
             <div class="query-body">
               <span class="c-tag">cortex-context</span>
-              <span class="c-key">init</span>
-              <span class="c-str">--url http://localhost:8082</span>
-              <span class="c-comment"
-                ># ✅ MCP configured + git hook installed</span
-              >
-              <span class="c-tag">cortex-context</span>
               <span class="c-key">sync</span>
-              <span class="c-str">--repo .</span>
-              <span class="c-comment"
-                ># ✅ Graph updated — Copilot has context</span
-              >
+              <span class="c-str">--repo .</span><br />
+              <span class="c-tag">cortex-context</span>
+              <span class="c-key">doctor</span>
             </div>
           </div>
         </div>
@@ -1466,17 +1513,16 @@
       <div class="section-inner">
         <h2 class="cta-title">Your codebase has<br />a memory now.</h2>
         <p class="cta-sub">
-          Stop pasting context into chat. Build a live knowledge graph your AI
-          agents can actually query.
+          Stop pasting repetitive context into chat. Build a live, queryable Context Store your AI agents can rely on.
         </p>
         <div class="cta-actions">
           <a
-            href="https://www.npmjs.com/package/@cortex-context/cli"
+            href="https://github.com/rodrigoroldan/cli-cortex-context/releases/tag/v0.1.0"
             target="_blank"
             class="btn-hero-primary"
-            >View on npm ↗</a
+            >Download CLI Release ↗</a
           >
-          <a href="#ontology" class="btn-hero-secondary">Explore the docs</a>
+          <a href="https://github.com/rodrigoroldan/cortex-context" target="_blank" class="btn-hero-secondary">Explore on GitHub</a>
         </div>
       </div>
     </section>
@@ -1535,18 +1581,14 @@
           Cortex Context
         </div>
         <div class="footer-links">
-          <a href="#ontology">Docs</a>
-          <a
-            href="https://www.npmjs.com/package/@cortex-context/cli"
-            target="_blank"
-            >npm</a
-          >
-          <a href="#features">Features</a>
+          <a href="#context-store">Architecture</a>
+          <a href="#codegraph">CodeGraph</a>
+          <a href="#ontology">Ontology</a>
           <a href="#cli">CLI</a>
+          <a href="https://github.com/rodrigoroldan/cortex-context" target="_blank">GitHub</a>
         </div>
         <div class="footer-copy">
-          &copy; 2026 Cortex Context &middot; CLI v0.0.1 &middot; Graph v1
-          &middot; Open Source
+          &copy; 2026 Cortex Context &middot; CLI v0.1.0 &middot; Context Store for AI-DLC
         </div>
       </div>
     </footer>
