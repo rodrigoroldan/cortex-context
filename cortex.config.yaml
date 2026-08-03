@@ -51,6 +51,21 @@ filesystem:
   workspace_root: "/workspace"
   specs_dir: "/specs" # Diretório raiz das specs (plan.md)
 
+# ─── Filtros de ingestão ──────────────────────────────────────────────────────
+# Padrões de arquivo/diretório excluídos do glob de dimensões source_type:
+# filesystem (ex: "code"), aplicados sobre o caminho relativo ao source_path.
+# Sintaxe estilo .gitignore: "**" casa zero ou mais segmentos de diretório.
+ingest:
+  exclude_patterns:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/.git/**"
+    - "**/.venv/**"
+    - "**/venv/**"
+    - "**/__pycache__/**"
+    - "**/.next/**"
+
 # ─── Fonte GitHub API ────────────────────────────────────────────────────────
 # Configurações para parsers que buscam arquivos via GitHub API.
 # Requer GITHUB_TOKEN no .env para repos privados.

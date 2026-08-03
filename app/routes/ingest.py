@@ -3,12 +3,17 @@ routes/ingest.py — Router genérico para ingestão de qualquer dimensão com s
 """
 from __future__ import annotations
 
+import base64
 import glob
 import logging
+import shutil
 import sys
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Security, status, BackgroundTasks
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -16,6 +21,7 @@ from pydantic import BaseModel
 
 from app.config import Settings, get_settings
 from app.core.dimension_loader import DimensionConfig, load_dimensions
+from app.core.glob_filter import filter_excluded_paths
 from app.core.graph_builder import ingest_chunks, ingest_edges, ingest_nodes  # noqa: F401
 from app.core.parser_registry import get_parser
 from app.core.parsers.manifest import IngestManifest, ManifestIngestResponse
@@ -75,6 +81,36 @@ def _get_plugins_dir(cfg: dict) -> Path | None:
     return plugins_dir if plugins_dir.exists() else None
 
 
+def _get_exclude_patterns(cfg: dict) -> list[str]:
+    return cfg.get("ingest", {}).get("exclude_patterns", [])
+
+
+async def _fetch_github_file(owner: str, repo: str, path: str, branch: str, token: str) -> str | None:
+    """Busca o conteúdo de um arquivo via GitHub Contents API. Retorna None em falha."""
+    if not owner or not repo:
+        return None
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers, params={"ref": branch} if branch else {})
+        if resp.status_code != 200:
+            logger.warning(
+                "GitHub API retornou %d para %s/%s/%s@%s", resp.status_code, owner, repo, path, branch
+            )
+            return None
+        data = resp.json()
+        content_b64 = data.get("content", "")
+        if not content_b64:
+            return None
+        return base64.b64decode(content_b64).decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.error("Erro ao buscar '%s' via GitHub API (%s/%s@%s): %s", path, owner, repo, branch, e)
+        return None
+
+
 # ─── Response models ──────────────────────────────────────────────────────────
 
 
@@ -107,10 +143,13 @@ async def _run_ingest_pipeline(
     plugins_dir: Path | None = None,
     background_tasks: BackgroundTasks | None = None,
     domain_id: str = "default",
+    cfg: dict | None = None,
 ) -> IngestResponse:
     """
     Executa o pipeline completo de ingestão para uma única dimensão com isolamento por domain_id.
     """
+    cfg = cfg or {}
+    exclude_patterns = _get_exclude_patterns(cfg)
     driver = get_driver()
 
     # 1. Aplicar índices/constraints declarados no dimension YAML
@@ -128,16 +167,63 @@ async def _run_ingest_pipeline(
             detail=f"Parser '{dim_config.parser}' não encontrado para dimensão '{dim_config.dimension}'",
         )
 
+    # `ingest_strategy: github` (cortex.config.yaml) força dimensões agents_manifest
+    # (ex: "service") a buscar via GitHub API mesmo quando o YAML declara
+    # source_type: filesystem — ver issue #9.
+    effective_source_type = dim_config.source_type
+    if dim_config.parser == "builtin.agents_manifest" and cfg.get("ingest_strategy") == "github":
+        effective_source_type = "github_api"
+
     # 3. Descobrir arquivos fonte
     source_path = Path(dim_config.source_path) if dim_config.source_path else None
     file_paths: list[Path] = []
+    file_configs: dict[Path, DimensionConfig] = {}
+    tmp_dir: Path | None = None
 
-    if dim_config.source_type == "filesystem" and source_path and source_path.exists():
+    if effective_source_type == "github_api":
+        repo_sources = cfg.get("repo_sources", [])
+        github_cfg = cfg.get("github", {})
+        owner = github_cfg.get("owner", "")
+        default_branch = github_cfg.get("default_branch", "main")
+        github_token = get_settings().github_token
+
+        if not owner:
+            logger.warning("source_type: github_api requer 'github.owner' em cortex.config.yaml")
+        if not repo_sources:
+            logger.warning(
+                "Dimensão '%s': ingest_strategy=github sem 'repo_sources' configurado em cortex.config.yaml",
+                dim_config.dimension,
+            )
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="cortex-github-"))
+        for repo in repo_sources:
+            repo_name = repo.get("name")
+            if not repo_name:
+                continue
+            agents_path = repo.get("agents_path", "AGENTS.md")
+            branch = repo.get("branch") or default_branch
+            service_id = repo.get("service_id")
+
+            content = await _fetch_github_file(owner, repo_name, agents_path, branch, github_token)
+            if content is None:
+                logger.warning(
+                    "Falha ao buscar '%s' de %s/%s@%s via GitHub API", agents_path, owner, repo_name, branch
+                )
+                continue
+
+            local_path = tmp_dir / repo_name / Path(agents_path).name
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text(content, encoding="utf-8")
+            file_paths.append(local_path)
+            if service_id:
+                file_configs[local_path] = replace(dim_config, extra={**dim_config.extra, "service_id": service_id})
+    elif dim_config.source_type == "filesystem" and source_path and source_path.exists():
         for pattern in dim_config.source_patterns:
             matched = [Path(p) for p in glob.glob(str(source_path / pattern), recursive=True)]
             file_paths.extend(matched)
         seen: set[Path] = set()
         file_paths = [p for p in file_paths if not (p in seen or seen.add(p))]  # type: ignore
+        file_paths = filter_excluded_paths(file_paths, source_path, exclude_patterns)
     else:
         if dim_config.source_type == "filesystem" and source_path and not source_path.exists():
             logger.warning(
@@ -154,17 +240,21 @@ async def _run_ingest_pipeline(
     files_parsed = 0
     files_failed = 0
 
-    for file_path in file_paths:
-        if not parser.can_parse(file_path):
-            continue
-        try:
-            result = parser.parse(file_path, dim_config)
-            all_nodes.extend(result.nodes)
-            all_edges.extend(result.edges)
-            files_parsed += 1
-        except Exception as e:
-            logger.error("Erro ao parsear %s: %s", file_path, e)
-            files_failed += 1
+    try:
+        for file_path in file_paths:
+            if not parser.can_parse(file_path):
+                continue
+            try:
+                result = parser.parse(file_path, file_configs.get(file_path, dim_config))
+                all_nodes.extend(result.nodes)
+                all_edges.extend(result.edges)
+                files_parsed += 1
+            except Exception as e:
+                logger.error("Erro ao parsear %s: %s", file_path, e)
+                files_failed += 1
+    finally:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Estampar domain_id nas propriedades de todos os nós e arestas
     for node in all_nodes:
@@ -194,6 +284,7 @@ async def _run_ingest_pipeline(
         details={
             "files_parsed": files_parsed,
             "files_failed": files_failed,
+            "source_type": effective_source_type,
             "source_path": str(source_path) if source_path else None,
             "parser": dim_config.parser,
             "pillar": dim_config.pillar,
@@ -403,7 +494,7 @@ async def ingest_dimension(
             detail=f"Dimension YAML não encontrado ou inválido para '{dim_key}'",
         )
 
-    return await _run_ingest_pipeline(dims[0], plugins_dir, background_tasks, domain_id=domain_id)
+    return await _run_ingest_pipeline(dims[0], plugins_dir, background_tasks, domain_id=domain_id, cfg=cfg)
 
 
 @router.post(
@@ -435,7 +526,7 @@ async def ingest_all(
 
     for dim in dims:
         try:
-            result = await _run_ingest_pipeline(dim, plugins_dir, background_tasks, domain_id=domain_id)
+            result = await _run_ingest_pipeline(dim, plugins_dir, background_tasks, domain_id=domain_id, cfg=cfg)
             results.append(result)
             total_nodes += result.nodes_upserted
             total_edges += result.edges_upserted
