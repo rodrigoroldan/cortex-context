@@ -20,6 +20,7 @@ from pathlib import Path
 from neo4j import AsyncDriver
 
 from app.core.dimension_loader import DimensionConfig, load_dimensions
+from app.core.glob_filter import filter_excluded_paths
 from app.core.graph_builder import create_constraint_if_not_exists, ingest_edges, ingest_nodes
 from app.core.parser_registry import get_parser
 from app.core.parsers.base import NodeData
@@ -45,8 +46,11 @@ async def _apply_constraints(driver: AsyncDriver, config: DimensionConfig) -> in
     return count
 
 
-def _glob_files_for_dimension(config: DimensionConfig, base_dir: Path) -> list[Path]:
-    """Encontra todos os arquivos que batem com os padrões do dimension config."""
+def _glob_files_for_dimension(
+    config: DimensionConfig, base_dir: Path, exclude_patterns: list[str] | None = None
+) -> list[Path]:
+    """Encontra todos os arquivos que batem com os padrões do dimension config,
+    excluindo os que baterem com `exclude_patterns` (ex: ingest.exclude_patterns)."""
     files: list[Path] = []
     for pattern in config.source_patterns:
         matched = list(base_dir.glob(pattern))
@@ -58,7 +62,7 @@ def _glob_files_for_dimension(config: DimensionConfig, base_dir: Path) -> list[P
         if f not in seen:
             seen.add(f)
             deduped.append(f)
-    return deduped
+    return filter_excluded_paths(deduped, base_dir, exclude_patterns or [])
 
 
 async def run_dimension_pipeline(
@@ -66,6 +70,7 @@ async def run_dimension_pipeline(
     config: DimensionConfig,
     base_dir: Path,
     dry_run: bool = False,
+    exclude_patterns: list[str] | None = None,
 ) -> tuple[list[NodeData], PipelineResult]:
     """
     Executa o pipeline para uma única dimensão.
@@ -86,7 +91,7 @@ async def run_dimension_pipeline(
         result.constraints_created = await _apply_constraints(driver, config)
 
     # Glob + parse
-    files = _glob_files_for_dimension(config, base_dir)
+    files = _glob_files_for_dimension(config, base_dir, exclude_patterns)
     logger.info("[%s] %d arquivo(s) encontrado(s)", config.dimension, len(files))
 
     all_nodes: list[NodeData] = []
@@ -120,6 +125,7 @@ async def run_full_pipeline(
     active_dimensions: list[str],
     base_dirs_by_dimension: dict[str, Path],
     dry_run: bool = False,
+    exclude_patterns: list[str] | None = None,
 ) -> PipelineResult:
     """
     Executa o pipeline completo para todas as dimensões ativas.
@@ -131,6 +137,8 @@ async def run_full_pipeline(
         base_dirs_by_dimension: Diretório base de busca de arquivos por dimensão
             ex: {"spec": Path("/specs"), "service": Path("/repos")}
         dry_run: Se True, não grava no Neo4j
+        exclude_patterns: Padrões (ingest.exclude_patterns) a excluir do glob de
+            dimensões filesystem, ex: ["**/node_modules/**"]
 
     Returns:
         PipelineResult agregado de todas as dimensões
@@ -141,7 +149,7 @@ async def run_full_pipeline(
 
     for config in configs:
         base_dir = base_dirs_by_dimension.get(config.dimension, Path("."))
-        nodes, result = await run_dimension_pipeline(driver, config, base_dir, dry_run)
+        nodes, result = await run_dimension_pipeline(driver, config, base_dir, dry_run, exclude_patterns)
         all_nodes_by_dimension[config.dimension] = nodes
         aggregated.nodes_upserted += result.nodes_upserted
         aggregated.edges_upserted += result.edges_upserted

@@ -203,6 +203,15 @@ github:
 
 See [`cortex.config.yaml`](cortex.config.yaml) for the full annotated config.
 
+> **Editing config after deploy**: the reference `docker-compose.yml` mounts
+> `cortex.config.yaml`, `app/dimensions/` and `plugins/` as read-only volumes
+> over the copies baked into the image, so `git pull` + `docker compose restart
+> cortex` picks up config/dimension changes with **no rebuild** needed. If you
+> run a custom image/compose file without those mounts, the container keeps
+> using whatever was in the image at build time — silently, with no warning —
+> so you must `docker compose build` (or re-pull a rebuilt image) for changes
+> to take effect.
+
 ---
 
 ## API Reference
@@ -213,6 +222,18 @@ See [`cortex.config.yaml`](cortex.config.yaml) for the full annotated config.
 | ------ | -------------------------- | ---------------------------------------------------- |
 | `POST` | `/api/v1/ingest/{dim_key}` | Ingest a specific dimension (e.g. `spec`, `service`) |
 | `POST` | `/api/v1/ingest`           | Ingest all active dimensions                         |
+| `POST` | `/api/v1/ingest/manifest`  | Bulk upsert of pre-computed `nodes`/`edges`, any dimension |
+| `POST` | `/api/v1/code/ingest`      | Bulk upsert of a pre-computed AST/call-graph (files, symbols, calls) |
+
+**Client-side parsing**: `/ingest/{dim_key}` and `/ingest` require the server to have
+filesystem access to your sources (bind mount). If you'd rather parse on the client
+(e.g. in CI, where the repo is already checked out) and just push the result, use
+`/ingest/manifest` (generic — any `node_labels`/`domain_id`/`branch`) or `/code/ingest`
+(purpose-built for AST/call-graph data: `files`, `symbols`, `calls`, `implements_specs`,
+`complies_adrs`, `exposes_apis`). Both respect `domain_id`/`branch`/`draft` for
+multi-tenancy and the Shadow Graph, and avoid ever mounting your repos into the
+server — see [`app/routes/ingest.py`](app/routes/ingest.py) and
+[`app/routes/code.py`](app/routes/code.py) for the request schemas.
 
 ### Full-Text Search
 

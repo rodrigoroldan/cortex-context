@@ -1,14 +1,49 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+import yaml
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.core.dimension_loader import load_dimensions
 from app.core.embedder import init_embedder
-from app.db.neo4j import apply_domain_indexes, apply_branch_indexes, apply_vector_index, close_driver, init_driver
+from app.db.neo4j import apply_domain_indexes, apply_branch_indexes, apply_index, apply_vector_index, close_driver, init_driver
 from app.routes import code, consolidate, health, ingest, nodes, query, semantic
+
+_CONFIG_PATH = Path(__file__).parent.parent / "cortex.config.yaml"
+
+
+async def _apply_dimension_indexes() -> None:
+    """
+    Cria as constraints/índices declarados em CADA dimension YAML presente em
+    dimensions_dir (não só as listadas em active_dimensions) no startup —
+    independente de já ter sido feita alguma ingestão via /ingest/{dim_key}.
+
+    active_dimensions controla quais dimensões o pipeline filesystem-based
+    (/ingest, /ingest/{dim_key}) varre; não controla quais dimensões podem
+    receber nós via rotas de bulk upsert client-side (/ingest/manifest,
+    /code/ingest). A dimensão "code", por exemplo, tem rota dedicada
+    (/code/ingest) mas normalmente fica fora de active_dimensions (evita
+    glob completo do workspace no servidor — ver issue #13). Sem aplicar sua
+    constraint/fulltext index aqui, ela nunca seria criada.
+    """
+    if not _CONFIG_PATH.exists():
+        return
+    cfg = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    dimensions_dir = Path(cfg.get("dimensions_dir", "app/dimensions"))
+    if not dimensions_dir.is_absolute():
+        dimensions_dir = _CONFIG_PATH.parent / dimensions_dir
+    if not dimensions_dir.exists():
+        return
+
+    all_dimensions = sorted(p.stem for p in dimensions_dir.glob("*.yaml"))
+    for dim_config in load_dimensions(dimensions_dir, all_dimensions):
+        for idx in dim_config.indexes:
+            if idx.cypher:
+                await apply_index(idx.cypher)
 
 
 @asynccontextmanager
@@ -17,6 +52,7 @@ async def lifespan(app: FastAPI):
     await init_driver(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
     await apply_domain_indexes()
     await apply_branch_indexes()
+    await _apply_dimension_indexes()
 
     # ── Inicializar embedder (Vector RAG) ──────────────────────────────────────
     # Se provider="none" (default), o embedder fica desabilitado e o sistema
