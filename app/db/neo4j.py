@@ -90,7 +90,7 @@ async def apply_vector_index(dimensions: int = 384) -> None:
         "CREATE VECTOR INDEX document_chunks IF NOT EXISTS "
         "FOR (n:DocumentChunk) ON n.embedding "
         f"OPTIONS {{indexConfig: {{`vector.dimensions`: {dimensions}, "
-        "`vector.similarity_function`: 'cosine'}}}}"
+        "`vector.similarity_function`: 'cosine'}}"
     )
     await apply_index(cypher)
     logger.info("Vector index 'document_chunks' configurado (%d dims)", dimensions)
