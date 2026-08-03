@@ -90,7 +90,10 @@ async def test_adversarial_2hop_traversal_cross_domain_leak():
 
         # Document finding assertion:
         if leaked_edges and not has_path_all_clause:
-            pytest.fail("SECURITY LEAK REPRODUCED: 2-hop traversal leaked cross-domain relationship to 'svc-B1' (domain_B) into domain_A query response!")
+            pytest.fail(
+                "SECURITY LEAK REPRODUCED: 2-hop traversal leaked cross-domain relationship "
+                "to 'svc-B1' (domain_B) into domain_A query response!"
+            )
     finally:
         neo4j_module._driver = old_driver
 
@@ -140,7 +143,10 @@ async def test_adversarial_manifest_property_domain_spoofing():
     actual_domain = cypher_kwargs.get("domain_id")
 
     # If actual_domain is tenant_B, then tenant_A succeeded in writing to tenant_B!
-    assert actual_domain == "tenant_A", f"VULNERABILITY REPRODUCED: Node was upserted into '{actual_domain}' instead of authenticated domain 'tenant_A'!"
+    assert actual_domain == "tenant_A", (
+        f"VULNERABILITY REPRODUCED: Node was upserted into '{actual_domain}' "
+        "instead of authenticated domain 'tenant_A'!"
+    )
 
 
 # ─── Challenge 3: Vector Search Filtering & Domain Isolation ─────────────────

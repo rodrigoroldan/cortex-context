@@ -2,9 +2,12 @@
 tests/test_challenger_m3_stress.py — Empirical Stress Test Suite for Milestone M3.
 
 Executed by Challenger 1 (challenger_m3_1) to stress-test:
-1. Backstage catalog parsing: empty YAML docs, missing metadata, complex entity refs, node label mapping, edge extraction.
-2. Frontmatter contract validator: invalid IDs (uppercase, spaces, special chars), invalid status strings, missing required fields, missing --- header.
-3. Async background embedding & domain_id propagation: non-blocking background tasks, domain_id attachment to nodes, edges, and chunks.
+1. Backstage catalog parsing: empty YAML docs, missing metadata, complex entity refs,
+   node label mapping, edge extraction.
+2. Frontmatter contract validator: invalid IDs (uppercase, spaces, special chars),
+   invalid status strings, missing required fields, missing --- header.
+3. Async background embedding & domain_id propagation: non-blocking background tasks,
+   domain_id attachment to nodes, edges, and chunks.
 """
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch

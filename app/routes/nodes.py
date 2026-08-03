@@ -143,11 +143,13 @@ async def list_dimensions(
 
     for dim_key, dim_cfg in dim_map.items():
         async with driver.session() as session:
-            r = await session.run(
-                f"MATCH (n:{dim_cfg.node_label}) WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) RETURN count(n) AS cnt",
-                domain_id=domain_id,
-                branch=branch,
+            cypher_cnt = (
+                f"MATCH (n:{dim_cfg.node_label}) "
+                "WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) "
+                "AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) "
+                "RETURN count(n) AS cnt"
             )
+            r = await session.run(cypher_cnt, domain_id=domain_id, branch=branch)
             records = await r.data()
         cnt = records[0]["cnt"] if records else 0
         result.append(DimensionInfo(key=dim_key, node_label=dim_cfg.node_label, count=cnt))
@@ -200,7 +202,12 @@ async def list_nodes(
             result = await session.run(cypher, domain_id=domain_id, branch=branch, **filters)
             records = await result.data()
     else:
-        cypher = f"MATCH (n:{dim_cfg.node_label}) WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) RETURN n {{.*}} AS props ORDER BY n.id"
+        cypher = (
+            f"MATCH (n:{dim_cfg.node_label}) "
+            "WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) "
+            "AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) "
+            "RETURN n {.*} AS props ORDER BY n.id"
+        )
         async with driver.session() as session:
             result = await session.run(cypher, domain_id=domain_id, branch=branch)
             records = await result.data()
@@ -243,9 +250,15 @@ async def get_node(
               AND (n.id = $node_id OR n.id = $draft_id OR (n.canonical_id = $node_id AND n.branch = $branch) OR n.canonical_id = $node_id)
               AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false)
             OPTIONAL MATCH (n)-[r_out]->(neighbor_out)
-            WHERE neighbor_out IS NULL OR ((neighbor_out.domain_id = $domain_id OR ($domain_id = 'default' AND neighbor_out.domain_id IS NULL)) AND (neighbor_out.branch = $branch OR neighbor_out.branch = 'main' OR neighbor_out.branch IS NULL OR neighbor_out.is_draft = false))
+            WHERE neighbor_out IS NULL
+               OR ((neighbor_out.domain_id = $domain_id OR ($domain_id = 'default' AND neighbor_out.domain_id IS NULL))
+                   AND (neighbor_out.branch = $branch OR neighbor_out.branch = 'main'
+                        OR neighbor_out.branch IS NULL OR neighbor_out.is_draft = false))
             OPTIONAL MATCH (n)<-[r_in]-(neighbor_in)
-            WHERE neighbor_in IS NULL OR ((neighbor_in.domain_id = $domain_id OR ($domain_id = 'default' AND neighbor_in.domain_id IS NULL)) AND (neighbor_in.branch = $branch OR neighbor_in.branch = 'main' OR neighbor_in.branch IS NULL OR neighbor_in.is_draft = false))
+            WHERE neighbor_in IS NULL
+               OR ((neighbor_in.domain_id = $domain_id OR ($domain_id = 'default' AND neighbor_in.domain_id IS NULL))
+                   AND (neighbor_in.branch = $branch OR neighbor_in.branch = 'main'
+                        OR neighbor_in.branch IS NULL OR neighbor_in.is_draft = false))
             RETURN
                 n {{.*}} AS props,
                 collect(DISTINCT {{

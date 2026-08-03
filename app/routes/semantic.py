@@ -175,12 +175,27 @@ async def semantic_search(
     async with driver.session() as session:
         hop_clause = f"(seed)-[r*1..{hops}]-(neighbor)" if hops > 0 else "(seed)"
 
+        match_seed = (
+            "MATCH (seed) WHERE seed.id IN $parent_ids AND NOT seed:DocumentChunk "
+            "AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL)) "
+            "AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)"
+        )
+        opt_match = f"OPTIONAL MATCH path = {hop_clause}" if hops > 0 else ""
+        opt_where = (
+            "WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL AND NOT neighbor:DocumentChunk "
+            "AND ALL(n IN nodes(path) WHERE n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) "
+            "AND (neighbor.branch = $branch OR neighbor.branch = 'main' OR neighbor.branch IS NULL OR neighbor.is_draft = false)"
+            if hops > 0 else ""
+        )
+        with_nodes = f"WITH collect(DISTINCT seed) {('+ collect(DISTINCT neighbor)' if hops > 0 else '')} AS all_nodes,"
+        with_rels = f"{('collect(DISTINCT r) AS all_rels' if hops > 0 else '[] AS all_rels')}"
+
         cypher = f"""
-        MATCH (seed) WHERE seed.id IN $parent_ids AND NOT seed:DocumentChunk AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL)) AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)
-        {"OPTIONAL MATCH path = " + hop_clause if hops > 0 else ""}
-        {"WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL AND NOT neighbor:DocumentChunk AND ALL(n IN nodes(path) WHERE n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) AND (neighbor.branch = $branch OR neighbor.branch = 'main' OR neighbor.branch IS NULL OR neighbor.is_draft = false)" if hops > 0 else ""}
-        WITH collect(DISTINCT seed) {("+ collect(DISTINCT neighbor)" if hops > 0 else "")} AS all_nodes,
-             {("collect(DISTINCT r) AS all_rels" if hops > 0 else "[] AS all_rels")}
+        {match_seed}
+        {opt_match}
+        {opt_where}
+        {with_nodes}
+             {with_rels}
         UNWIND all_nodes AS n
         WITH collect(DISTINCT n) AS nodes, all_rels
         UNWIND all_rels AS rel_list

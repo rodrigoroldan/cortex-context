@@ -127,8 +127,21 @@ def test_left_outer_priority_merge_deduplication():
 
 def test_merge_node_summaries_priority():
     items = [
-        NodeSummary(id="spec-100", label="Spec", properties={"title": "Main Spec", "branch": "main", "is_draft": False}),
-        NodeSummary(id="draft:feat/login:spec-100", label="Spec", properties={"title": "Draft Spec", "branch": "feat/login", "is_draft": True, "canonical_id": "spec-100"}),
+        NodeSummary(
+            id="spec-100",
+            label="Spec",
+            properties={"title": "Main Spec", "branch": "main", "is_draft": False},
+        ),
+        NodeSummary(
+            id="draft:feat/login:spec-100",
+            label="Spec",
+            properties={
+                "title": "Draft Spec",
+                "branch": "feat/login",
+                "is_draft": True,
+                "canonical_id": "spec-100",
+            },
+        ),
     ]
 
     merged = _merge_node_summaries_priority(items, branch="feat/login")

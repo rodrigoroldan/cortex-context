@@ -18,6 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from app.core.parsers.builtin.markdown_frontmatter import (
+    FrontmatterContractValidator,
     MarkdownFrontmatterParser,
     _extract_frontmatter,
     _extract_h1,

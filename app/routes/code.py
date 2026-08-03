@@ -663,8 +663,12 @@ async def ingest_code_graph(
 
     # 3. Processar Chamadas (CALLS)
     for c in payload.calls:
-        from_id = f"draft:{effective_branch}:{c.caller_id}" if (is_draft and effective_branch != "main" and not c.caller_id.startswith("draft:")) else c.caller_id
-        to_id = f"draft:{effective_branch}:{c.callee_id}" if (is_draft and effective_branch != "main" and not c.callee_id.startswith("draft:")) else c.callee_id
+        is_draft_caller = is_draft and effective_branch != "main" and not c.caller_id.startswith("draft:")
+        from_id = f"draft:{effective_branch}:{c.caller_id}" if is_draft_caller else c.caller_id
+
+        is_draft_callee = is_draft and effective_branch != "main" and not c.callee_id.startswith("draft:")
+        to_id = f"draft:{effective_branch}:{c.callee_id}" if is_draft_callee else c.callee_id
+
         edges.append(
             EdgeData(
                 from_id=from_id,
@@ -676,7 +680,8 @@ async def ingest_code_graph(
 
     # 4. Processar Vínculos com Specs (IMPLEMENTS_SPEC)
     for imp in payload.implements_specs:
-        sym_id = f"draft:{effective_branch}:{imp.symbol_id}" if (is_draft and effective_branch != "main" and not imp.symbol_id.startswith("draft:")) else imp.symbol_id
+        is_draft_sym = is_draft and effective_branch != "main" and not imp.symbol_id.startswith("draft:")
+        sym_id = f"draft:{effective_branch}:{imp.symbol_id}" if is_draft_sym else imp.symbol_id
         edges.append(
             EdgeData(
                 from_id=sym_id,
@@ -688,7 +693,8 @@ async def ingest_code_graph(
 
     # 5. Processar Vínculos com ADRs (COMPLIES_WITH)
     for comp in payload.complies_adrs:
-        sym_id = f"draft:{effective_branch}:{comp.symbol_id}" if (is_draft and effective_branch != "main" and not comp.symbol_id.startswith("draft:")) else comp.symbol_id
+        is_draft_sym = is_draft and effective_branch != "main" and not comp.symbol_id.startswith("draft:")
+        sym_id = f"draft:{effective_branch}:{comp.symbol_id}" if is_draft_sym else comp.symbol_id
         edges.append(
             EdgeData(
                 from_id=sym_id,
@@ -700,7 +706,8 @@ async def ingest_code_graph(
 
     # 6. Processar APIs (EXPOSES_API)
     for exp in payload.exposes_apis:
-        sym_id = f"draft:{effective_branch}:{exp.symbol_id}" if (is_draft and effective_branch != "main" and not exp.symbol_id.startswith("draft:")) else exp.symbol_id
+        is_draft_sym = is_draft and effective_branch != "main" and not exp.symbol_id.startswith("draft:")
+        sym_id = f"draft:{effective_branch}:{exp.symbol_id}" if is_draft_sym else exp.symbol_id
         edges.append(
             EdgeData(
                 from_id=sym_id,
