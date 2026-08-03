@@ -116,7 +116,7 @@ class ImplementationsResponse(BaseModel):
 )
 async def get_call_hierarchy(
     symbol: str = Query(..., description="Nome ou ID do símbolo/função"),
-    direction: str = Query("callers", regex="^(callers|callees)$", description="Direção: callers (quem chama) ou callees (quem é chamado)"),
+    direction: str = Query("callers", pattern="^(callers|callees)$", description="Direção: callers (quem chama) ou callees (quem é chamado)"),
     depth: int = Query(2, ge=1, le=5, description="Profundidade máxima de travessia (1 a 5)"),
     domain_id: str = Depends(get_domain_id),
     branch: str = Depends(get_branch),

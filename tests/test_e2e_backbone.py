@@ -880,13 +880,15 @@ class TestTier2BoundaryAndCornerCases:
         assert res.status_code == 422
 
     def test_ingest_manifest_token_auth_rejection(self, test_app: FastAPI):
-        with patch("app.config.get_settings") as mock_settings:
-            mock_s = MagicMock()
-            mock_s.cortex_api_token = "secret-token"
-            mock_settings.return_value = mock_s
-            client = TestClient(test_app)
-            res = client.post("/api/v1/ingest/manifest", json={"source": "test"})
-            assert res.status_code == 401
+        mock_s = Settings(cortex_api_token="secret-token")
+        test_app.dependency_overrides[get_settings] = lambda: mock_s
+        try:
+            with patch("app.config.get_settings", return_value=mock_s), patch("app.routes.ingest.get_settings", return_value=mock_s):
+                client = TestClient(test_app)
+                res = client.post("/api/v1/ingest/manifest", json={"source": "test"})
+                assert res.status_code == 401
+        finally:
+            test_app.dependency_overrides.clear()
 
     # Feature 3 Boundary
     @pytest.mark.asyncio
@@ -927,12 +929,11 @@ class TestTier2BoundaryAndCornerCases:
         node = ManifestNode(node_id="n-no-domain", node_labels=["Spec"])
         assert "domain_id" not in node.properties
 
-    def test_batch_upsert_empty_list_of_nodes(self):
+    @pytest.mark.asyncio
+    async def test_batch_upsert_empty_list_of_nodes(self):
         driver = MagicMock()
         # Ingesting empty list should return 0 without calling session
-        import asyncio
-        loop = asyncio.get_event_loop()
-        count = loop.run_until_complete(ingest_nodes(driver, []))
+        count = await ingest_nodes(driver, [])
         assert count == 0
 
     # Feature 4 Boundary
@@ -1752,7 +1753,11 @@ class TestTier4RealWorldApplicationScenarios:
                     "node_labels": ["Spec", "Intent"],
                     "properties": {"title": "Core Platform V2 Spec", "domain_id": domain_id},
                 },
-                cat_res.nodes[0].properties,
+                {
+                    "node_id": cat_res.nodes[0].node_id,
+                    "node_labels": cat_res.nodes[0].node_labels,
+                    "properties": cat_res.nodes[0].properties,
+                },
             ],
             "edges": [],
         }

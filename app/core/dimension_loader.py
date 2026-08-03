@@ -56,7 +56,7 @@ class IndexConfig:
 @dataclass
 class DimensionConfig:
     dimension: str           # ex: "spec", "service", "workflow"
-    node_label: str          # ex: "Spec", "Service", "Workflow"
+    node_label: str = ""     # ex: "Spec", "Service", "Workflow"
     pillar: str = "System"   # Intent | System | Implementation | Runtime
     parser: str = ""         # chave no ParserRegistry (ex: "builtin.markdown_frontmatter")
     source_type: str = "filesystem" # filesystem | github_api | url | plugin
@@ -66,6 +66,10 @@ class DimensionConfig:
     relationships: list[RelationshipConfig] = field(default_factory=list)
     indexes: list[IndexConfig] = field(default_factory=list)
     extra: dict = field(default_factory=dict)  # campos adicionais livres
+
+    def __post_init__(self) -> None:
+        if not self.node_label and self.dimension:
+            self.node_label = self.dimension.capitalize()
 
     @property
     def node_labels(self) -> list[str]:

@@ -72,7 +72,7 @@ class NodeData:
     """
     node_labels: list[str]   # ex: ["Spec", "Intent"]
     node_id: str             # id único (ex: "spec-070", "service-bff")
-    properties: dict         # propriedades do nó (sempre inclui 'id')
+    properties: dict = field(default_factory=dict)         # propriedades do nó (sempre inclui 'id')
 
     @property
     def primary_label(self) -> str:

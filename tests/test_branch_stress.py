@@ -161,7 +161,7 @@ def test_stress_pr_linter_dry_run_validation(client):
         "nodes": [
             {
                 "node_id": "",  # Missing node_id
-                "node_labels": [],  # Empty node_labels
+                "node_labels": [""],  # Empty string label
                 "properties": {},
             }
         ],

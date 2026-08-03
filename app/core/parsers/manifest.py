@@ -10,6 +10,7 @@ class ManifestNode(BaseModel):
     """Nó a ser inserido/atualizado no grafo."""
 
     node_id: str = Field(
+        default="",
         description="ID único do nó (ex: 'spec-149', 'service-bff', 'workflow-payment', ou 'draft:feat/auth:spec-149')"
     )
     node_labels: list[str] = Field(
