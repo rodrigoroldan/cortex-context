@@ -284,6 +284,9 @@ Returns `503` when `CORTEX_EMBEDDING_PROVIDER=none`.
 | `service`  | System         | `builtin.agents_manifest`      | `AGENTS.md` / `agents.md` (github_api or filesystem) |
 | `workflow` | Implementation | `builtin.markdown_frontmatter` | `**/temporal/**/*.yaml`, `**/workflows/**/*.md`      |
 | `adr`      | System         | `builtin.markdown_frontmatter` | `**/docs/adr/**/*.md`                                |
+| `concept`  | Intent         | `builtin.markdown_frontmatter` | `**/*.md` under `/concepts` (filesystem)             |
+| `history`  | Implementation | `builtin.markdown_frontmatter` | `**/*.md` under `/history` (filesystem)              |
+| `code`     | Implementation | `builtin.code_ast`             | `**/*.{ts,js,tsx,jsx,py,go,java}` — not in `active_dimensions` by default; fed via `POST /api/v1/code/ingest` bulk upsert instead of the filesystem glob (see [Client-side parsing](#ingestion)) |
 
 Dimensions are fully configurable via individual YAML files in `app/dimensions/`. See [docs/DIMENSION-SCHEMA.md](docs/DIMENSION-SCHEMA.md) for the full schema.
 
