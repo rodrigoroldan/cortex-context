@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     # Padrão: all-MiniLM-L6-v2 (384 dims, ~22MB, rápido e preciso)
     cortex_embedding_model: str = "all-MiniLM-L6-v2"
 
+    # Limite de itens (files + symbols + calls + implements_specs + complies_adrs +
+    # exposes_apis somados) aceito por requisição em POST /api/v1/code/ingest.
+    # Acima disso, retorna 413 pedindo pro cliente dividir em chunks menores (issue #17).
+    code_ingest_max_items: int = 10000
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -138,9 +138,10 @@ async def test_adversarial_manifest_property_domain_spoofing():
 
     await ingest_nodes(driver, nodes, domain_id=effective_domain_id)
 
-    # Check effective domain_id passed to Cypher
+    # Check effective domain_id passed to Cypher (batched: nested per-row in `rows`,
+    # not a top-level kwarg — see issue #17)
     cypher_kwargs = mock_session.run.call_args[1]
-    actual_domain = cypher_kwargs.get("domain_id")
+    actual_domain = cypher_kwargs["rows"][0]["domain_id"]
 
     # If actual_domain is tenant_B, then tenant_A succeeded in writing to tenant_B!
     assert actual_domain == "tenant_A", (

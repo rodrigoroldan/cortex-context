@@ -73,6 +73,12 @@ def test_ingest_manifest_dry_run_linter_mode(api_client):
 
 
 def test_ingest_manifest_draft_composite_node_ids(api_client, mock_neo4j_driver):
+    # ingest_edges now validates that from/to nodes actually matched (issue #16);
+    # tell the mock the edge matched instead of relying on the empty-list default.
+    mock_neo4j_driver.session.return_value.run.return_value.data = AsyncMock(
+        return_value=[{"from_id": "draft:feat/payment:spec-pay-01", "to_id": "service-gateway", "matched": True}]
+    )
+
     manifest_data = {
         "source": "cli-sync",
         "branch": "feat/payment",

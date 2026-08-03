@@ -581,6 +581,25 @@ async def ingest_code_graph(
     branch: str = Depends(get_branch),
     _token: str = Depends(_verify_token),
 ) -> CodeGraphIngestResponse:
+    total_items = (
+        len(payload.files)
+        + len(payload.symbols)
+        + len(payload.calls)
+        + len(payload.implements_specs)
+        + len(payload.complies_adrs)
+        + len(payload.exposes_apis)
+    )
+    max_items = get_settings().code_ingest_max_items
+    if total_items > max_items:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=(
+                f"Payload com {total_items} itens excede o limite de {max_items} "
+                "(files+symbols+calls+implements_specs+complies_adrs+exposes_apis). "
+                "Divida o AST em chunks menores e envie múltiplas requisições."
+            ),
+        )
+
     effective_domain = payload.domain_id if (payload.domain_id and payload.domain_id != "default") else domain_id
     effective_branch = payload.branch or branch or "main"
     is_draft = payload.draft
@@ -590,7 +609,11 @@ async def ingest_code_graph(
 
     driver = get_driver()
     nodes: list[NodeData] = []
-    edges: list[EdgeData] = []
+    defines_edges: list[EdgeData] = []
+    calls_edges: list[EdgeData] = []
+    specs_edges: list[EdgeData] = []
+    adrs_edges: list[EdgeData] = []
+    apis_edges: list[EdgeData] = []
 
     # 1. Processar Arquivos
     for f in payload.files:
@@ -652,7 +675,7 @@ async def ingest_code_graph(
         # Aresta DEFINES: (file) -> (symbol)
         file_id = f"file:{s.file_path}"
         file_from_id = f"draft:{effective_branch}:{file_id}" if (is_draft and effective_branch != "main") else file_id
-        edges.append(
+        defines_edges.append(
             EdgeData(
                 from_id=file_from_id,
                 to_id=symbol_node_id,
@@ -669,7 +692,7 @@ async def ingest_code_graph(
         is_draft_callee = is_draft and effective_branch != "main" and not c.callee_id.startswith("draft:")
         to_id = f"draft:{effective_branch}:{c.callee_id}" if is_draft_callee else c.callee_id
 
-        edges.append(
+        calls_edges.append(
             EdgeData(
                 from_id=from_id,
                 to_id=to_id,
@@ -682,7 +705,7 @@ async def ingest_code_graph(
     for imp in payload.implements_specs:
         is_draft_sym = is_draft and effective_branch != "main" and not imp.symbol_id.startswith("draft:")
         sym_id = f"draft:{effective_branch}:{imp.symbol_id}" if is_draft_sym else imp.symbol_id
-        edges.append(
+        specs_edges.append(
             EdgeData(
                 from_id=sym_id,
                 to_id=imp.spec_id,
@@ -695,7 +718,7 @@ async def ingest_code_graph(
     for comp in payload.complies_adrs:
         is_draft_sym = is_draft and effective_branch != "main" and not comp.symbol_id.startswith("draft:")
         sym_id = f"draft:{effective_branch}:{comp.symbol_id}" if is_draft_sym else comp.symbol_id
-        edges.append(
+        adrs_edges.append(
             EdgeData(
                 from_id=sym_id,
                 to_id=comp.adr_id,
@@ -708,7 +731,7 @@ async def ingest_code_graph(
     for exp in payload.exposes_apis:
         is_draft_sym = is_draft and effective_branch != "main" and not exp.symbol_id.startswith("draft:")
         sym_id = f"draft:{effective_branch}:{exp.symbol_id}" if is_draft_sym else exp.symbol_id
-        edges.append(
+        apis_edges.append(
             EdgeData(
                 from_id=sym_id,
                 to_id=exp.api_id,
@@ -718,7 +741,16 @@ async def ingest_code_graph(
         )
 
     nodes_ok = await ingest_nodes(driver, nodes, commit_sha=payload.commit_sha, domain_id=effective_domain)
-    edges_ok = await ingest_edges(driver, edges, domain_id=effective_domain)
+    # Ingerido por categoria (em vez de uma lista única) para que a resposta reporte
+    # quantas arestas de cada tipo foram REALMENTE persistidas — antes, specs_linked/
+    # adrs_linked/apis_linked/calls_upserted apenas ecoavam len(payload.x), reportando
+    # sucesso mesmo quando 0 arestas eram de fato criadas no Neo4j (ver issue #16).
+    defines_ok = await ingest_edges(driver, defines_edges, domain_id=effective_domain)
+    calls_ok = await ingest_edges(driver, calls_edges, domain_id=effective_domain)
+    specs_ok = await ingest_edges(driver, specs_edges, domain_id=effective_domain)
+    adrs_ok = await ingest_edges(driver, adrs_edges, domain_id=effective_domain)
+    apis_ok = await ingest_edges(driver, apis_edges, domain_id=effective_domain)
+    edges_ok = defines_ok + calls_ok + specs_ok + adrs_ok + apis_ok
 
     return CodeGraphIngestResponse(
         domain_id=effective_domain,
@@ -726,9 +758,12 @@ async def ingest_code_graph(
         draft=is_draft,
         symbols_upserted=len(payload.symbols),
         files_upserted=len(payload.files),
-        calls_upserted=len(payload.calls),
-        specs_linked=len(payload.implements_specs),
-        adrs_linked=len(payload.complies_adrs),
-        apis_linked=len(payload.exposes_apis),
-        message=f"AST Code Graph ingerido com sucesso: {nodes_ok} nós, {edges_ok} arestas persistidas.",
+        calls_upserted=calls_ok,
+        specs_linked=specs_ok,
+        adrs_linked=adrs_ok,
+        apis_linked=apis_ok,
+        message=(
+            f"AST Code Graph ingerido: {nodes_ok} nós, {edges_ok} arestas persistidas "
+            f"({defines_ok} defines, {calls_ok} calls, {specs_ok} specs, {adrs_ok} adrs, {apis_ok} apis)."
+        ),
     )

@@ -140,7 +140,15 @@ class TestTier1Feature02FastAPIIngestionDomainStamping:
         assert data["nodes_upserted"] == 1
         assert "payments-squad" in manifest_data["nodes"][0]["properties"]["domain_id"]
 
-    def test_ingest_manifest_with_explicit_edge_domain_stamping(self, api_client: TestClient):
+    def test_ingest_manifest_with_explicit_edge_domain_stamping(self, api_client: TestClient, mock_neo4j_driver: MagicMock):
+        # ingest_edges validates that from/to nodes actually matched (issue #16), so the
+        # mocked session needs to report a matched row instead of the fixture's generic
+        # empty-list default (which is correct for read-path/query tests, but would make
+        # a real "0 edges persisted" bug indistinguishable from this happy path).
+        mock_neo4j_driver.session.return_value.run.return_value.data = AsyncMock(
+            return_value=[{"from_id": "spec-c1", "to_id": "svc-c1", "matched": True}]
+        )
+
         manifest_data = {
             "source": "cli-sync",
             "domain_id": "checkout-domain",
@@ -214,7 +222,9 @@ class TestTier1Feature03Neo4jDomainIdPartitioning:
     async def test_upsert_edge_includes_domain_id_property(self):
         driver = MagicMock()
         mock_session = AsyncMock()
-        mock_session.run = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.single = AsyncMock(return_value={"edge_count": 1})
+        mock_session.run = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         driver.session = MagicMock(return_value=mock_session)
@@ -250,7 +260,13 @@ class TestTier1Feature03Neo4jDomainIdPartitioning:
     async def test_ingest_edges_batch_stamping(self):
         driver = MagicMock()
         mock_session = AsyncMock()
-        mock_session.run = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.data = AsyncMock(
+            return_value=[
+                {"from_id": f"n{i}", "to_id": f"n{i + 1}", "matched": True} for i in range(4)
+            ]
+        )
+        mock_session.run = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         driver.session = MagicMock(return_value=mock_session)
@@ -916,7 +932,9 @@ class TestTier2BoundaryAndCornerCases:
     async def test_upsert_edge_null_domain_id_fallback(self):
         driver = MagicMock()
         mock_session = AsyncMock()
-        mock_session.run = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.single = AsyncMock(return_value={"edge_count": 1})
+        mock_session.run = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         driver.session = MagicMock(return_value=mock_session)
