@@ -258,11 +258,11 @@ async def trace_symbol(
         OPTIONAL MATCH (target)-[:EXPOSES_API]->(api:API)
         OPTIONAL MATCH (target)-[:COMPLIES_WITH]->(adr:ADR)
         OPTIONAL MATCH (svc:Service)-[:CONTAINS_CODE]->(target)
-        RETURN target {{.*}} AS target_props,
-               svc {{.*}} AS service_props,
-               collect(DISTINCT spec {{.*}}) AS specs,
-               collect(DISTINCT api {{.*}}) AS apis,
-               collect(DISTINCT adr {{.*}}) AS adrs
+        RETURN target {.*} AS target_props,
+               svc {.*} AS service_props,
+               collect(DISTINCT spec {.*}) AS specs,
+               collect(DISTINCT api {.*}) AS apis,
+               collect(DISTINCT adr {.*}) AS adrs
         LIMIT 1
         """
         result = await session.run(cypher, symbol=symbol, domain_id=domain_id, branch=branch)
