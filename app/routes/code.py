@@ -106,6 +106,21 @@ class ImplementationsResponse(BaseModel):
     branch: str
 
 
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _sanitize_props(props: dict) -> dict:
+    result = {}
+    for k, v in props.items():
+        if hasattr(v, "iso_format"):
+            result[k] = v.iso_format()
+        elif hasattr(v, "__class__") and v.__class__.__module__.startswith("neo4j"):
+            result[k] = str(v)
+        else:
+            result[k] = v
+    return result
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -322,9 +337,10 @@ async def trace_symbol(
             if adr and adr.get("id")
         ]
 
+        service_props = row.get("service_props")
         return SymbolTraceResponse(
             symbol=sym_node,
-            service=row.get("service_props"),
+            service=_sanitize_props(service_props) if service_props else None,
             implements_specs=implements_specs,
             exposes_apis=exposes_apis,
             complies_with_adrs=complies_with_adrs,
