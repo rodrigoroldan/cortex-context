@@ -6,6 +6,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from neo4j.time import DateTime as Neo4jDateTime
 
 from app.routes.code import trace_symbol
 
@@ -53,5 +54,43 @@ async def test_trace_symbol_sends_valid_map_projection_cypher():
 
         assert response.symbol.id == "sym-1"
         assert response.symbol.name == "do_thing"
+    finally:
+        neo4j_module._driver = old_driver
+
+
+@pytest.mark.asyncio
+async def test_trace_symbol_sanitizes_service_datetime_props():
+    """
+    Regression for #21: `service` came straight from `svc {.*}` (raw Cypher map
+    projection), including bookkeeping props like `ingested_at`/`valid_from` that the
+    Neo4j driver returns as `neo4j.time.DateTime`, not native `datetime`. Pydantic can't
+    serialize that type, so any symbol attached to a Service raised a
+    PydanticSerializationError (surfaced to callers as a 500). service_props must be run
+    through the same sanitizer used elsewhere in the routes layer (query.py, nodes.py)
+    before being handed to the response model.
+    """
+    now = Neo4jDateTime.now()
+    record = {
+        "target_props": {"id": "sym-1", "name": "do_thing", "domain_id": "default", "branch": "main"},
+        "service_props": {"id": "svc-1", "name": "billing", "ingested_at": now, "valid_from": now},
+        "specs": [],
+        "apis": [],
+        "adrs": [],
+    }
+    driver, _ = _make_mock_driver(record)
+
+    from app.db import neo4j as neo4j_module
+    old_driver = neo4j_module._driver
+    neo4j_module._driver = driver
+    try:
+        response = await trace_symbol(symbol="do_thing", domain_id="default", branch="main", _token="")
+
+        # Must not raise PydanticSerializationError, and the datetime fields must have
+        # been converted to plain strings.
+        dumped = response.model_dump_json()
+        assert response.service is not None
+        assert isinstance(response.service["ingested_at"], str)
+        assert isinstance(response.service["valid_from"], str)
+        assert "svc-1" in dumped
     finally:
         neo4j_module._driver = old_driver
