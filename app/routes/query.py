@@ -213,15 +213,14 @@ async def query_context(
             WITH collect(DISTINCT seed) + collect(DISTINCT neighbor) AS all_nodes,
                  collect(DISTINCT r) AS all_rels
             UNWIND all_nodes AS n
-            WITH collect(DISTINCT n) AS nodes, all_rels
-            UNWIND all_rels AS rel_list
-            UNWIND rel_list AS rel
+            WITH collect(DISTINCT n) AS nodes,
+                 reduce(flat = [], rel_list IN all_rels | flat + rel_list) AS flat_rels
             RETURN nodes,
-                   collect(DISTINCT {{
+                   [rel IN flat_rels | {{
                        from: startNode(rel).id,
                        to: endNode(rel).id,
                        type: type(rel)
-                   }}) AS edges
+                   }}] AS edges
             """,
             seed_ids=all_seed_ids,
             domain_id=domain_id,
@@ -244,12 +243,17 @@ async def query_context(
                     node_labels = seed_props[n["id"]]["labels"]
                 nodes.append(_neo4j_node_to_context(dict(n), node_labels))
 
+        seen_edges: set[tuple[str, str, str]] = set()
         for e in row.get("edges", []):
             if e and e.get("from") and e.get("to"):
                 if e.get("type") == "CHUNK_OF":
                     continue
                 if "__chunk_" in str(e.get("from", "")) or "__chunk_" in str(e.get("to", "")):
                     continue
+                key = (e["from"], e["to"], e.get("type", ""))
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
                 edges.append(EdgeContext(
                     from_id=e["from"],
                     to_id=e["to"],
