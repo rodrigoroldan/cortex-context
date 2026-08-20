@@ -184,33 +184,59 @@ async def list_nodes(
         if k not in _reserved
     }
 
+    raw_limit = request.query_params.get("limit")
+    limit: int | None = None
+    if raw_limit is not None:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'limit' inválido: '{raw_limit}'. Deve ser um inteiro.",
+            )
+
     driver = get_driver()
 
-    if filters:
-        for k in filters:
-            if not IDENTIFIER_REGEX.match(k):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Chave de filtro inválida: '{k}'. Chaves de propriedade devem corresponder ao padrão '^[a-zA-Z_][a-zA-Z0-9_]*$'.",
-                )
-        where_parts = [f"n.{k} = ${k}" for k in filters]
-        where_parts.append("(n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))")
-        where_parts.append("(n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false)")
-        where_clause = "WHERE " + " AND ".join(where_parts)
-        cypher = f"MATCH (n:{dim_cfg.node_label}) {where_clause} RETURN n {{.*}} AS props ORDER BY n.id"
+    # `parameters=` (não **kwargs) evita colisão entre uma chave de filtro (ex: "query",
+    # usada como filtro pela tool MCP query_history) e o parâmetro posicional `query` do
+    # próprio AsyncSession.run(query, parameters=None, **kwargs) do driver neo4j (#24).
+    params: dict = {"domain_id": domain_id, "branch": branch, **filters}
+    limit_clause = ""
+    if limit is not None:
+        params["limit"] = limit
+        limit_clause = " LIMIT $limit"
+
+    try:
+        if filters:
+            for k in filters:
+                if not IDENTIFIER_REGEX.match(k):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Chave de filtro inválida: '{k}'. Chaves de propriedade devem corresponder ao padrão '^[a-zA-Z_][a-zA-Z0-9_]*$'.",
+                    )
+            where_parts = [f"n.{k} = ${k}" for k in filters]
+            where_parts.append("(n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))")
+            where_parts.append("(n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false)")
+            where_clause = "WHERE " + " AND ".join(where_parts)
+            cypher = f"MATCH (n:{dim_cfg.node_label}) {where_clause} RETURN n {{.*}} AS props ORDER BY n.id{limit_clause}"
+        else:
+            cypher = (
+                f"MATCH (n:{dim_cfg.node_label}) "
+                "WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) "
+                "AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) "
+                f"RETURN n {{.*}} AS props ORDER BY n.id{limit_clause}"
+            )
         async with driver.session() as session:
-            result = await session.run(cypher, domain_id=domain_id, branch=branch, **filters)
+            result = await session.run(cypher, parameters=params)
             records = await result.data()
-    else:
-        cypher = (
-            f"MATCH (n:{dim_cfg.node_label}) "
-            "WHERE (n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL)) "
-            "AND (n.branch = $branch OR n.branch = 'main' OR n.branch IS NULL OR n.is_draft = false) "
-            "RETURN n {.*} AS props ORDER BY n.id"
-        )
-        async with driver.session() as session:
-            result = await session.run(cypher, domain_id=domain_id, branch=branch)
-            records = await result.data()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Erro ao listar nós da dimensão '%s' com filtros %s", dim_key, filters)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno ao consultar dimensão '{dim_key}': {exc}",
+        ) from exc
 
     summaries = [
         NodeSummary(id=r["props"].get("id", ""), label=dim_cfg.node_label, properties=_sanitize_props(dict(r["props"])))
