@@ -190,6 +190,11 @@ async def semantic_search(
         with_nodes = f"WITH collect(DISTINCT seed) {('+ collect(DISTINCT neighbor)' if hops > 0 else '')} AS all_nodes,"
         with_rels = f"{('collect(DISTINCT r) AS all_rels' if hops > 0 else '[] AS all_rels')}"
 
+        # NB: `all_rels` is `[]` whenever hops=0 or the seeds simply have no matching
+        # relationships — and `UNWIND` over an empty list yields *zero rows*, which would
+        # wipe out the `nodes` already collected above along with it (#26). Flatten via
+        # `reduce`/list-comprehension instead of `UNWIND ... UNWIND ...` so an empty
+        # `all_rels` degrades to `edges: []` without discarding the row's `nodes`.
         cypher = f"""
         {match_seed}
         {opt_match}
@@ -197,15 +202,14 @@ async def semantic_search(
         {with_nodes}
              {with_rels}
         UNWIND all_nodes AS n
-        WITH collect(DISTINCT n) AS nodes, all_rels
-        UNWIND all_rels AS rel_list
-        UNWIND rel_list AS rel
+        WITH collect(DISTINCT n) AS nodes,
+             reduce(flat = [], rel_list IN all_rels | flat + rel_list) AS flat_rels
         RETURN nodes,
-               collect(DISTINCT {{
+               [rel IN flat_rels | {{
                    from: startNode(rel).id,
                    to: endNode(rel).id,
                    type: type(rel)
-               }}) AS edges
+               }}] AS edges
         """
 
         result = await session.run(cypher, parent_ids=parent_ids, domain_id=effective_domain, branch=effective_branch)
@@ -240,8 +244,13 @@ async def semantic_search(
                 chunk_score=parent_scores.get(nid),
             ))
 
+        seen_edges: set[tuple[str, str, str]] = set()
         for e in row.get("edges", []):
             if e and e.get("from") and e.get("to"):
+                key = (e["from"], e["to"], e.get("type", ""))
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
                 edges.append(SemanticEdgeResult(
                     from_id=e["from"],
                     to_id=e["to"],
