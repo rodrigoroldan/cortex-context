@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["query"])
 bearer = HTTPBearer(auto_error=False)
+
+# Timeout (segundos) aplicado no servidor Neo4j para a expansão de vizinhos.
+# Sem isso, uma combinação de muitos seeds + hops=2 pode rodar indefinidamente
+# e a conexão HTTP cai como 502 genérico em vez de um erro claro (issue #33).
+_EXPAND_QUERY_TIMEOUT_S = 10.0
 
 
 def _verify_token(
@@ -202,31 +208,39 @@ async def query_context(
             )
 
         # ── Expand: 1-hop neighbors ───────────────────────────────────────────
-        expand_result = await session.run(
-            f"""
-            MATCH (seed) WHERE seed.id IN $seed_ids AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL))
-              AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)
-            OPTIONAL MATCH path = (seed)-[r*1..{hops}]-(neighbor)
-            WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL
-              AND ALL(n IN nodes(path) WHERE n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))
-              AND (neighbor.branch = $branch OR neighbor.branch = 'main' OR neighbor.branch IS NULL OR neighbor.is_draft = false)
-            WITH collect(DISTINCT seed) + collect(DISTINCT neighbor) AS all_nodes,
-                 collect(DISTINCT r) AS all_rels
-            UNWIND all_nodes AS n
-            WITH collect(DISTINCT n) AS nodes,
-                 reduce(flat = [], rel_list IN all_rels | flat + rel_list) AS flat_rels
-            RETURN nodes,
-                   [rel IN flat_rels | {{
-                       from: startNode(rel).id,
-                       to: endNode(rel).id,
-                       type: type(rel)
-                   }}] AS edges
-            """,
-            seed_ids=all_seed_ids,
-            domain_id=domain_id,
-            branch=branch,
-        )
-        expand_records = await expand_result.data()
+        try:
+            expand_result = await session.run(
+                f"""
+                MATCH (seed) WHERE seed.id IN $seed_ids AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL))
+                  AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)
+                OPTIONAL MATCH path = (seed)-[r*1..{hops}]-(neighbor)
+                WHERE neighbor IS NOT NULL AND neighbor.id IS NOT NULL
+                  AND ALL(n IN nodes(path) WHERE n.domain_id = $domain_id OR ($domain_id = 'default' AND n.domain_id IS NULL))
+                  AND (neighbor.branch = $branch OR neighbor.branch = 'main' OR neighbor.branch IS NULL OR neighbor.is_draft = false)
+                WITH collect(DISTINCT seed) + collect(DISTINCT neighbor) AS all_nodes,
+                     collect(DISTINCT r) AS all_rels
+                UNWIND all_nodes AS n
+                WITH collect(DISTINCT n) AS nodes,
+                     reduce(flat = [], rel_list IN all_rels | flat + rel_list) AS flat_rels
+                RETURN nodes,
+                       [rel IN flat_rels | {{
+                           from: startNode(rel).id,
+                           to: endNode(rel).id,
+                           type: type(rel)
+                       }}] AS edges
+                """,
+                seed_ids=all_seed_ids,
+                domain_id=domain_id,
+                branch=branch,
+                timeout=_EXPAND_QUERY_TIMEOUT_S,
+            )
+            expand_records = await expand_result.data()
+        except (Neo4jError, ServiceUnavailable, SessionExpired) as e:
+            logger.error("Timeout/erro na expansão de vizinhos (keywords=%s, hops=%d): %s", keyword_list, hops, e)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Consulta ao grafo excedeu o tempo limite — tente reduzir keywords/hops.",
+            ) from e
 
     # ── Montar resposta ───────────────────────────────────────────────────────
     nodes: list[NodeContext] = []
