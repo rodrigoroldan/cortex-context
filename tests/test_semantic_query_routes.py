@@ -103,6 +103,6 @@ async def test_query_context_expand_with_no_relationships_keeps_seed_nodes():
     assert response.nodes[0].id == "spec-1"
     assert response.edges == []
 
-    expand_cypher = mock_session.run.call_args_list[-1].args[0]
+    expand_cypher = str(mock_session.run.call_args_list[-1].args[0])
     assert "UNWIND all_rels" not in expand_cypher
     assert "reduce(" in expand_cypher
