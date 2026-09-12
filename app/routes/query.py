@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from neo4j import Query
 from neo4j.exceptions import Neo4jError, ServiceUnavailable, SessionExpired
 from pydantic import BaseModel
 
@@ -209,7 +210,7 @@ async def query_context(
 
         # ── Expand: 1-hop neighbors ───────────────────────────────────────────
         try:
-            expand_result = await session.run(
+            expand_query = Query(
                 f"""
                 MATCH (seed) WHERE seed.id IN $seed_ids AND (seed.domain_id = $domain_id OR ($domain_id = 'default' AND seed.domain_id IS NULL))
                   AND (seed.branch = $branch OR seed.branch = 'main' OR seed.branch IS NULL OR seed.is_draft = false)
@@ -229,10 +230,13 @@ async def query_context(
                            type: type(rel)
                        }}] AS edges
                 """,
+                timeout=_EXPAND_QUERY_TIMEOUT_S,
+            )
+            expand_result = await session.run(
+                expand_query,
                 seed_ids=all_seed_ids,
                 domain_id=domain_id,
                 branch=branch,
-                timeout=_EXPAND_QUERY_TIMEOUT_S,
             )
             expand_records = await expand_result.data()
         except (Neo4jError, ServiceUnavailable, SessionExpired) as e:
