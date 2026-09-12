@@ -3,6 +3,7 @@ routes/query.py — Consulta semântica cross-dimension ao grafo Cortex Context 
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -25,6 +26,14 @@ bearer = HTTPBearer(auto_error=False)
 # Sem isso, uma combinação de muitos seeds + hops=2 pode rodar indefinidamente
 # e a conexão HTTP cai como 502 genérico em vez de um erro claro (issue #33).
 _EXPAND_QUERY_TIMEOUT_S = 10.0
+
+# Timeout no nível do asyncio para a rota inteira (seed + expand). O timeout do
+# Neo4j acima é aplicado no servidor, mas o driver async nem sempre propaga a
+# própria falha de volta pro `await` (transação marcada "Terminated" no Neo4j
+# sem o cliente Python nunca ser notificado — visto ao vivo via `SHOW TRANSACTIONS`
+# em 2026-09-12). Este wait_for garante que a rota SEMPRE responde dentro do
+# limite, mesmo se o driver ficar pendurado.
+_ROUTE_TIMEOUT_S = 15.0
 
 
 def _verify_token(
@@ -160,6 +169,35 @@ async def query_context(
     fts_query = " OR ".join(keyword_list)
     hops = min(max(hops, 1), 2)
 
+    try:
+        return await asyncio.wait_for(
+            _run_query_context(
+                driver, keyword_list, fts_query, limit, hops, pillar, dimension, domain_id, branch
+            ),
+            timeout=_ROUTE_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError as e:
+        logger.error(
+            "Query context excedeu %ss (keywords=%s, hops=%d) — driver não respondeu a tempo",
+            _ROUTE_TIMEOUT_S, keyword_list, hops,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Consulta ao grafo excedeu o tempo limite — tente reduzir keywords/hops.",
+        ) from e
+
+
+async def _run_query_context(
+    driver,
+    keyword_list: list[str],
+    fts_query: str,
+    limit: int,
+    hops: int,
+    pillar: str | None,
+    dimension: str | None,
+    domain_id: str,
+    branch: str,
+) -> SubgraphResponse:
     async with driver.session() as session:
         # ── Seed: FTS cross-dimension ─────────────────────────────────────────
         fts_indexes = ["spec_fulltext", "service_fulltext", "workflow_fulltext"]

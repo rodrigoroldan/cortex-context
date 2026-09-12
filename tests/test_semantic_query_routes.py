@@ -4,9 +4,12 @@ app/routes/query.py graph-expansion Cypher.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from app.routes.query import query_context
 from app.routes.semantic import SemanticSearchRequest, semantic_search
@@ -106,3 +109,59 @@ async def test_query_context_expand_with_no_relationships_keeps_seed_nodes():
     expand_cypher = str(mock_session.run.call_args_list[-1].args[0])
     assert "UNWIND all_rels" not in expand_cypher
     assert "reduce(" in expand_cypher
+
+
+@pytest.mark.asyncio
+async def test_query_context_bounds_response_time_when_driver_hangs():
+    """
+    Regression for #33/#34/#35: a server-side Neo4j transaction timeout was observed
+    (`SHOW TRANSACTIONS` -> "Terminated with reason: TransactionTimedOutClientConfiguration")
+    without the async driver ever surfacing that failure back to the awaiting coroutine —
+    the `await session.run(...).data()` call itself just hung. The Neo4j-side timeout
+    (Query(..., timeout=X)) is defense in depth, but the route MUST still bound its own
+    response time regardless of whether the driver ever notices the server-side abort.
+    """
+    fts_record = {
+        "props": {"id": "spec-1", "title": "Pagamento PIX", "pillar": "Intent"},
+        "labels": ["Spec", "Intent"],
+        "score": 1.0,
+    }
+
+    call_count = 0
+
+    async def _run_side_effect(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            result = MagicMock()
+            result.data = AsyncMock(return_value=[fts_record])
+            return result
+        if call_count in (2, 3):
+            result = MagicMock()
+            result.data = AsyncMock(return_value=[])
+            return result
+        # 4th call = the expand query: simulates the driver hanging even though
+        # the Neo4j server already terminated the transaction on its own timeout.
+        await asyncio.sleep(3600)
+
+    mock_session = AsyncMock()
+    mock_session.run = AsyncMock(side_effect=_run_side_effect)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    driver = MagicMock()
+    driver.session = MagicMock(return_value=mock_session)
+
+    with patch("app.routes.query.get_driver", return_value=driver), patch(
+        "app.routes.query._ROUTE_TIMEOUT_S", 0.05
+    ):
+        start = time.monotonic()
+        with pytest.raises(HTTPException) as exc_info:
+            await query_context(
+                keywords="pagamento", limit=8, hops=1, pillar=None, dimension=None,
+                domain_id="default", branch="main", _token="",
+            )
+        elapsed = time.monotonic() - start
+
+    assert exc_info.value.status_code == 504
+    assert elapsed < 1.0, f"route must bound response time even if the driver hangs, took {elapsed}s"
