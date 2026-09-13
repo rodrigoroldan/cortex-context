@@ -112,6 +112,32 @@ async def test_query_context_expand_with_no_relationships_keeps_seed_nodes():
 
 
 @pytest.mark.asyncio
+async def test_query_context_seeds_from_real_fulltext_index_names():
+    """
+    Regression: the `spec` fulltext index is named `spec_fts` (see dimension config /
+    `SHOW INDEXES`), but query_context used to look up a nonexistent `spec_fulltext`
+    index. `db.index.fulltext.queryNodes` raised for the missing index, was swallowed
+    by the bare `except Exception: pass` in the seed loop, and every keyword search
+    silently returned zero specs — the graph had data, but /query (and therefore
+    query_product_context) always answered "nothing found".
+    """
+    driver, mock_session = _make_mock_session([[], [], []])
+
+    with patch("app.routes.query.get_driver", return_value=driver):
+        await query_context(
+            keywords="evento,pagamento", limit=8, hops=1, pillar=None, dimension=None,
+            domain_id="default", branch="main", _token="",
+        )
+
+    seed_calls = mock_session.run.call_args_list[:3]
+    queried_indexes = [str(call.args[0]) for call in seed_calls]
+    assert any("spec_fts" in q for q in queried_indexes), (
+        "expected a lookup against the real 'spec_fts' index, not a nonexistent name"
+    )
+    assert not any("spec_fulltext" in q for q in queried_indexes)
+
+
+@pytest.mark.asyncio
 async def test_query_context_bounds_response_time_when_driver_hangs():
     """
     Regression for #33/#34/#35: a server-side Neo4j transaction timeout was observed
