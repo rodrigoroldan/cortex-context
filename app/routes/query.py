@@ -200,7 +200,7 @@ async def _run_query_context(
 ) -> SubgraphResponse:
     async with driver.session() as session:
         # ── Seed: FTS cross-dimension ─────────────────────────────────────────
-        fts_indexes = ["spec_fulltext", "service_fulltext", "workflow_fulltext"]
+        fts_indexes = ["spec_fts", "service_fulltext", "workflow_fulltext"]
         all_seed_ids: list[str] = []
         seed_props: dict[str, dict] = {}
 
