@@ -274,8 +274,13 @@ origin that were not rewritten in this run (and have no issue data) are deleted 
 this also cleans up nodes created by the old one-node-per-file parser. Nothing is pruned if the specs
 directory is missing or contains no spec folder (e.g. a volume that failed to mount).
 
+At the end of every spec ingestion the `AFFECTS` edges (`Spec` → `Service`, from the spec's `repos`) are
+recomputed — for all specs on a full run, only for the touched specs on an incremental one. The old
+`AFFECTS` of those specs that this mechanism created are removed first, so a repo dropped from the
+frontmatter leaves no stale edge (edges created through `/ingest/manifest` or by hand are kept).
+
 Response `details`: `folders_parsed`, `folders_deleted`, `chunks_upserted`, `issues_parsed`,
-`issues_error`, `ignored_paths`, `pruned_nodes` (plus `mode`, `files_parsed`, `warnings`, …).
+`issues_error`, `ignored_paths`, `pruned_nodes` (plus `mode`, `affects_edges`, `files_parsed`, `warnings`, …).
 
 **Specs from GitHub issues** (optional) — set the repo in `cortex.config.yaml` (empty = off) and put a
 `GITHUB_TOKEN` in `.env` for private repos (read access to issues):
@@ -303,9 +308,14 @@ folder, the folder wins. An issue that loses the label is pruned on the next ful
 
 **Query params**: `keywords` (required), `limit` (default `8`), `hops` (default `1`), `pillar` (`Intent|System|Implementation|Runtime`), `dimension` (`spec|service|...`)
 
-Besides title/summary/labels, the query also searches the **body** of specs (`doc_chunk_fts`): each
-matching chunk adds its parent spec as a seed (after the title hits, deduplicated, up to `limit`). Such
-nodes carry `match_snippet` (`"<source_file>: …excerpt…"`), and the same excerpt is appended to the
+Besides title/summary/labels, the query also searches the **body** of specs (`doc_chunk_fts`) — always,
+not only when the title search leaves room: each matching chunk adds its parent spec as a seed (if it is not
+one already), up to `max(2, limit // 3)` body specs **on top of** the title hits, so the total can exceed
+`limit`. The default tokenizer splits `https://api-staging.example.dev/x` into `api` + `staging.example.dev`,
+so a search for `api-staging` matches `api` in hundreds of chunks; the query therefore fetches more
+candidates (`max(limit * 10, 50)`) and ranks chunks that contain a keyword **literally** (case-insensitive
+substring) before the rest, then by score. Such nodes carry `match_snippet` (`"<source_file>:
+…excerpt…"`, anchored on the literal occurrence when there is one), and the same excerpt is appended to the
 `summary` **in the response only** (`summary + "\n> 🔎 <source_file>: …excerpt…"`) so clients that only
 display `summary` still show why the spec matched. Nothing is written to the graph.
 
