@@ -133,6 +133,8 @@ def make_chunk_node(
     pillar: str,
     *,
     embedding: list[float] | None = None,
+    chunk_key: str | None = None,
+    extra_props: dict | None = None,
 ) -> NodeData:
     """
     Cria um NodeData representando um DocumentChunk filho de um nó pai.
@@ -146,8 +148,17 @@ def make_chunk_node(
         content:     Texto do chunk (pronto para embedding)
         pillar:      Pilar I.S.I.R do pai (ex: "Intent")
         embedding:   Vetor float opcional; None até que o embedder processe.
+        chunk_key:   Discriminador opcional da origem do chunk dentro do pai
+                     (ex: slug do arquivo). Com ele o id vira
+                     "{parent_id}__{chunk_key}__chunk_{i}" — necessário quando um
+                     mesmo pai tem chunks de vários arquivos. O marcador
+                     "__chunk_" é sempre mantido (a busca o usa para filtrar).
+        extra_props: Propriedades adicionais do chunk (ex: source_file, chunk_source).
     """
-    chunk_id = f"{parent_id}__chunk_{chunk_index}"
+    if chunk_key:
+        chunk_id = f"{parent_id}__{chunk_key}__chunk_{chunk_index}"
+    else:
+        chunk_id = f"{parent_id}__chunk_{chunk_index}"
     props: dict = {
         "id": chunk_id,
         "parent_id": parent_id,
@@ -155,6 +166,8 @@ def make_chunk_node(
         "content": content,
         "pillar": pillar,
     }
+    if extra_props:
+        props.update(extra_props)
     if embedding is not None:
         props["embedding"] = embedding
     return NodeData(

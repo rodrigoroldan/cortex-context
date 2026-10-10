@@ -95,6 +95,11 @@ _CROSS_REF_PATTERNS: list[tuple[str, re.Pattern]] = [
 # Padrão para extrair número e slug de diretórios estilo "NNN-slug"
 _NUMBERED_SLUG = re.compile(r"^(\d{3})-(.+)$")
 
+# Variante usada no modo "pasta de spec" (dimension.group_by = numbered_folder): aceita 3+
+# dígitos, pois o número vem do issue do GitHub e passa de 999. Fica separada de
+# _NUMBERED_SLUG para não alterar os ids das outras dimensões (adr, concept, history...).
+NUMBERED_FOLDER_SLUG = re.compile(r"^(\d{3,})-(.+)$")
+
 
 def _extract_frontmatter(content: str) -> tuple[dict, str]:
     """
@@ -178,7 +183,22 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
     def can_parse(self, file_path: Path) -> bool:
         return file_path.suffix in (".md", ".markdown")
 
-    def parse(self, file_path: Path, dimension_config: "DimensionConfig") -> ParseResult:
+    def parse(
+        self,
+        file_path: Path,
+        dimension_config: "DimensionConfig",
+        *,
+        folder_name: str | None = None,
+        emit_chunks: bool = True,
+    ) -> ParseResult:
+        """
+        Args:
+            folder_name: modo "pasta de spec" — nome da pasta numerada (ex: "861-slug") a usar
+                no lugar de file_path.parent.name (o arquivo pode estar numa subpasta) e que
+                aceita números com 3+ dígitos. None mantém o comportamento original.
+            emit_chunks: False suprime a geração de DocumentChunk (o modo pasta gera os chunks
+                de todos os arquivos por conta própria, com ids únicos por arquivo).
+        """
         try:
             content = file_path.read_text(encoding="utf-8")
         except Exception:
@@ -188,8 +208,9 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
 
         # Determinar o id do nó
         # Prioridade: frontmatter.id → slug do diretório → nome do arquivo sem extensão
-        parent = file_path.parent.name
-        match = _NUMBERED_SLUG.match(parent)
+        parent = folder_name if folder_name is not None else file_path.parent.name
+        slug_pattern = NUMBERED_FOLDER_SLUG if folder_name is not None else _NUMBERED_SLUG
+        match = slug_pattern.match(parent)
 
         if "id" in frontmatter:
             node_id = str(frontmatter["id"])
@@ -272,7 +293,7 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
         chunk_nodes: list[NodeData] = []
         chunk_edges: list[EdgeData] = []
 
-        if is_embedder_enabled() and body.strip():
+        if emit_chunks and is_embedder_enabled() and body.strip():
             text_chunks = chunk_markdown(body, chunk_size=600, overlap=100)
             for idx, chunk_text in enumerate(text_chunks):
                 chunk_node = make_chunk_node(
