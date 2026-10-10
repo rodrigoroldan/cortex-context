@@ -21,6 +21,15 @@ Dois modos, escolhidos pelo corpo de `POST /api/v1/ingest/spec`:
 Ordem: remoções de pasta -> issues -> pastas (-> poda, no completo). A regra "pasta manda" é aplicada
 na própria escrita da issue (ver SpecGraphStore.upsert_issue_nodes), então não depende da ordem.
 
+Números repetidos: várias pastas podem ter o mesmo NNN (ex: 217-draft-invite, 217-register-email). Entre
+todas as pastas do disco com o mesmo número, em ordem alfabética, a primeira é `spec-NNN` e as demais
+`spec-NNN-<slug>` (assign_spec_ids); chunks e referências cruzadas da pasta usam o id novo, e as issues
+continuam enriquecendo `spec-NNN` (a dona). A regra só olha a listagem do disco, então a completa e a
+incremental concordam; na incremental, tocar uma pasta reprocessa as irmãs de mesmo número. Se a dona sai do
+disco, a próxima pasta é promovida a `spec-NNN` e o `spec-NNN-<slug>` antigo dela é apagado (incremental) ou
+podado (completa). Só um frontmatter.id próprio repetido colide: a segunda pasta é descartada e reportada em
+details.id_collisions.
+
 No fim, as arestas AFFECTS (Spec -> Service) são recalculadas a partir de `repos`: de todas as specs na
 completa, só das tocadas na incremental (as AFFECTS velhas dessas specs saem antes).
 
@@ -49,9 +58,12 @@ from app.core.parsers.builtin.markdown_frontmatter import MarkdownFrontmatterPar
 from app.core.spec_folders import (
     SpecFolder,
     SpecFolderParse,
+    assign_spec_ids,
     discover_spec_folders,
     extract_spec_folder_name,
     parse_spec_folder,
+    spec_id_from_folder_name,
+    spec_number_from_folder_name,
 )
 from app.core.spec_issues import (
     MappedIssue,
@@ -193,7 +205,8 @@ RETURN count(n) AS affected
 _FIND_BY_FOLDER = """
 MATCH (n:Spec {domain_id: $domain_id})
 WHERE n.source_folder IN $names
-RETURN n.id AS id, coalesce(n.has_issue, false) AS has_issue, n.issue_number AS issue_number
+RETURN n.id AS id, n.source_folder AS source_folder,
+       coalesce(n.has_issue, false) AS has_issue, n.issue_number AS issue_number
 """
 
 _LIST_FOLDER_NAMES = """
@@ -396,7 +409,8 @@ class _Stats:
     nodes_upserted: int = 0
     edges_upserted: int = 0
     warnings: list[str] = field(default_factory=list)
-    duplicate_folders: list[str] = field(default_factory=list)
+    duplicate_folders: list[dict] = field(default_factory=list)  # pastas re-identificadas (número repetido)
+    id_collisions: list[dict] = field(default_factory=list)  # pastas descartadas: frontmatter.id repetido
 
 
 async def _drop_issue_data(store: SpecGraphStore, rows: list[dict]) -> int:
@@ -418,22 +432,35 @@ async def _drop_issue_data(store: SpecGraphStore, rows: list[dict]) -> int:
 
 
 async def _release_folders(
-    store: SpecGraphStore, names: list[str], *, delete_orphans: bool, stats: _Stats
+    store: SpecGraphStore,
+    names: list[str],
+    *,
+    delete_orphans: bool,
+    stats: _Stats,
+    keep_ids: frozenset[str] | set[str] = frozenset(),
+    removed: list[str] | tuple[str, ...] = (),
 ) -> tuple[list[int], list[str]]:
     """
-    Trata pastas que não existem mais no disco.
+    Solta do grafo os nós cujo id deixou de ser o da pasta: pasta removida do disco ou pasta que mudou de id
+    (ex: um `spec-217-x` que virou o dono de `spec-217` depois que o dono antigo saiu).
 
-    Os chunks de folder dos nós afetados são sempre apagados. Nós sem dados de issue são apagados quando
+    `keep_ids` são os ids que ESTA execução vai regravar; esses nós não são tocados — o upsert os sobrescreve
+    e apagá-los levaria junto as arestas que outras specs têm para eles (ex: DEPENDS_ON -> spec-217).
+
+    Os chunks de folder dos nós soltos são sempre apagados. Nós sem dados de issue são apagados quando
     `delete_orphans` (incremental; no completo ficam para a poda). Nós com issue perdem só os dados de
     pasta (viram "só-issue"); devolve (números dessas issues, ids desses nós): o chamador re-sincroniza as
     issues (o título/summary/status voltam a ser os da issue) e recalcula as AFFECTS (o `repos` saiu junto
-    com a pasta).
+    com a pasta). `removed` são as pastas que sumiram do disco, para o contador `folders_deleted`.
     """
     nodes = await store.find_nodes_by_folder(names)
-    if not nodes:
+    if delete_orphans:
+        stats.folders_deleted += len({n.get("source_folder") for n in nodes} & set(removed))
+    stale = [n for n in nodes if n["id"] not in keep_ids]
+    if not stale:
         return [], []
-    with_issue = [n for n in nodes if n.get("has_issue")]
-    without_issue = [n for n in nodes if not n.get("has_issue")]
+    with_issue = [n for n in stale if n.get("has_issue")]
+    without_issue = [n for n in stale if not n.get("has_issue")]
 
     affected = [n["id"] for n in with_issue] + ([n["id"] for n in without_issue] if delete_orphans else [])
     await store.delete_folder_chunks(affected)
@@ -442,7 +469,8 @@ async def _release_folders(
     if with_issue:
         await store.strip_folder_data([n["id"] for n in with_issue])
 
-    stats.folders_deleted += len(names) if delete_orphans else len(with_issue)
+    if not delete_orphans:
+        stats.folders_deleted += len(with_issue)
     numbers = [int(n["issue_number"]) for n in with_issue if n.get("issue_number") is not None]
     return numbers, [n["id"] for n in with_issue]
 
@@ -518,7 +546,21 @@ async def run_spec_ingest(
     if source_ok and not folders:
         stats.warnings.append("nenhuma pasta de spec encontrada: remoções e poda ignoradas")
 
+    # ── Ids: números repetidos ────────────────────────────────────────────────
+    # Calculados sobre TODAS as pastas do disco (nunca só as tocadas): a primeira pasta de cada número, em
+    # ordem alfabética, é `spec-NNN` e as demais `spec-NNN-<slug>`, igual na completa e na incremental.
+    assigned_ids = assign_spec_ids(folders, dim_config.dimension)
+    parser = MarkdownFrontmatterParser()
+
+    def parse_one(name: str) -> SpecFolderParse | None:
+        try:
+            return parse_spec_folder(folders[name], dim_config, parser, spec_id=assigned_ids.get(name))
+        except Exception as e:  # uma pasta quebrada não derruba as demais
+            logger.error("Spec: erro ao parsear a pasta %s: %s", name, e)
+            return None
+
     # ── Alvos ────────────────────────────────────────────────────────────────
+    parsed_cache: dict[str, SpecFolderParse | None] = {}
     if incremental:
         assert request is not None
         names: list[str] = []
@@ -528,21 +570,29 @@ async def run_spec_ingest(
                 stats.ignored_paths.append(raw)
             elif name not in names:
                 names.append(name)
-        target_names = [n for n in names if n in folders]
         removed_names = [n for n in names if n not in folders]
+        # Tocar uma pasta pode mudar o id das irmãs de mesmo número (uma pasta que sai promove a próxima a
+        # `spec-NNN`; uma que entra antes do dono o rebaixa). Por isso todas as pastas do disco com o número
+        # de uma pasta tocada são reprocessadas juntas — o resultado é o mesmo da ingestão completa.
+        touched_numbers = {spec_number_from_folder_name(n) for n in names}
+        target_names = [n for n in folders if spec_number_from_folder_name(n) in touched_numbers]  # ordem alfabética
+        # O parse vem antes das remoções: elas precisam saber quais ids serão regravados.
+        parsed_cache = {name: parse_one(name) for name in target_names}
     else:
         target_names = list(folders)
         removed_names = []
 
-    # ── 1. Pastas removidas do disco ──────────────────────────────────────────
+    # ── 1. Pastas removidas do disco (e nós que perderam o id) ────────────────
     demoted_issue_numbers: list[int] = []
     demoted_ids: list[str] = []
-    if incremental and removed_names:
+    if incremental and (removed_names or target_names):
         if trusted:
+            keep_ids = {r.node.node_id for r in parsed_cache.values() if r is not None}
+            parsed_ok = [n for n in target_names if parsed_cache[n] is not None]  # pasta com falha não é mexida
             demoted_issue_numbers, demoted_ids = await _release_folders(
-                store, removed_names, delete_orphans=True, stats=stats
+                store, [*removed_names, *parsed_ok], delete_orphans=True, stats=stats, keep_ids=keep_ids, removed=removed_names
             )
-        else:
+        elif removed_names:
             stats.warnings.append(f"pastas ausentes não removidas do grafo: {', '.join(removed_names)}")
     elif not incremental and trusted:
         vanished = sorted(await store.list_folder_names() - set(folders))
@@ -581,7 +631,6 @@ async def run_spec_ingest(
         logger.warning("Spec: issues do GitHub não ingeridas: %s", e)
 
     # ── 3. Pastas: parse + upsert em lotes ────────────────────────────────────
-    parser = MarkdownFrontmatterParser()
     failed_folders: list[str] = []
     all_edges: list[EdgeData] = []
     seen_ids: dict[str, str] = {}
@@ -590,20 +639,23 @@ async def run_spec_ingest(
     for batch_names in _batches(target_names, FOLDER_BATCH):
         parsed: list[SpecFolderParse] = []
         for name in batch_names:
-            try:
-                result = parse_spec_folder(folders[name], dim_config, parser)
-            except Exception as e:  # uma pasta quebrada não derruba as demais
-                logger.error("Spec: erro ao parsear a pasta %s: %s", name, e)
-                result = None
+            result = parsed_cache[name] if name in parsed_cache else parse_one(name)
             if result is None:
                 failed_folders.append(name)
                 continue
             node_id = result.node.node_id
             if node_id in seen_ids:
-                logger.warning("Spec: pasta %s resolve para %s, já ocupado por %s — ignorando", name, node_id, seen_ids[node_id])
-                stats.duplicate_folders.append(name)
+                # Com a regra de números repetidos só um frontmatter.id próprio pode colidir.
+                logger.error(
+                    "Spec: pasta %s tem id %s, já ocupado pela pasta %s (frontmatter.id repetido) — ignorada",
+                    name, node_id, seen_ids[node_id],
+                )
+                stats.id_collisions.append({"folder": name, "id": node_id, "kept_folder": seen_ids[node_id]})
                 continue
             seen_ids[node_id] = name
+            if node_id == assigned_ids.get(name) and node_id != spec_id_from_folder_name(name, dim_config.dimension):
+                logger.warning("Spec: número repetido — a pasta %s foi re-identificada como %s", name, node_id)
+                stats.duplicate_folders.append({"folder": name, "id": node_id})
             parsed.append(result)
             stats.files_parsed += result.files_parsed
             stats.files_failed += result.files_failed
@@ -678,7 +730,9 @@ async def run_spec_ingest(
     if stats.warnings:
         details["warnings"] = stats.warnings
     if stats.duplicate_folders:
-        details["duplicate_folders"] = stats.duplicate_folders
+        details["duplicate_folders"] = stats.duplicate_folders  # re-identificadas: aviso, não erro
+    if stats.id_collisions:
+        details["id_collisions"] = stats.id_collisions  # descartadas: frontmatter.id repetido
 
     return SpecIngestResult(
         nodes_upserted=stats.nodes_upserted,

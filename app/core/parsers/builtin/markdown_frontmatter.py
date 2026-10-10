@@ -190,6 +190,7 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
         *,
         folder_name: str | None = None,
         emit_chunks: bool = True,
+        default_id: str | None = None,
     ) -> ParseResult:
         """
         Args:
@@ -198,6 +199,9 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
                 aceita números com 3+ dígitos. None mantém o comportamento original.
             emit_chunks: False suprime a geração de DocumentChunk (o modo pasta gera os chunks
                 de todos os arquivos por conta própria, com ids únicos por arquivo).
+            default_id: modo pasta — id a usar no lugar do padrão "{dimensão}-{NNN}" (vale quando não há
+                frontmatter.id ou quando ele só repete o padrão). Desambigua pastas de mesmo número
+                (ex: "spec-217-register-email"); um frontmatter.id diferente do padrão tem prioridade.
         """
         try:
             content = file_path.read_text(encoding="utf-8")
@@ -212,13 +216,15 @@ class MarkdownFrontmatterParser(BaseCortexExtractor):
         slug_pattern = NUMBERED_FOLDER_SLUG if folder_name is not None else _NUMBERED_SLUG
         match = slug_pattern.match(parent)
 
+        number_id = f"{dimension_config.dimension}-{match.group(1)}" if match else None
         if "id" in frontmatter:
             node_id = str(frontmatter["id"])
         elif match:
-            number, _ = match.group(1), match.group(2)
-            node_id = f"{dimension_config.dimension}-{number}"
+            node_id = number_id
         else:
             node_id = f"{dimension_config.dimension}-{parent}"
+        if default_id and node_id == number_id:
+            node_id = default_id
 
         # Título
         title = frontmatter.get("title") or _extract_h1(body) or parent

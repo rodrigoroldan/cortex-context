@@ -37,6 +37,12 @@ class InMemorySpecStore:
         # Sempre posterior ao started_at do orquestrador, sem depender da resolução do relógio.
         return datetime.now(tz=timezone.utc) + timedelta(seconds=5)
 
+    def age(self, days: int = 1) -> None:
+        """Faz passar o tempo entre duas execuções: tudo que já foi gravado fica `days` dias mais velho."""
+        delta = timedelta(days=days)
+        for item in [*self.nodes.values(), *self.chunks.values()]:
+            item["ingested_at"] = item["ingested_at"] - delta
+
     # -- seed de estado prévio ----------------------------------------------
 
     def seed_node(self, node_id: str, *, ingested_at: datetime = LONG_AGO, **props) -> dict:
@@ -183,7 +189,12 @@ class InMemorySpecStore:
 
     async def find_nodes_by_folder(self, names: list[str]) -> list[dict]:
         return [
-            {"id": n["id"], "has_issue": bool(n.get("has_issue")), "issue_number": n.get("issue_number")}
+            {
+                "id": n["id"],
+                "source_folder": n.get("source_folder"),
+                "has_issue": bool(n.get("has_issue")),
+                "issue_number": n.get("issue_number"),
+            }
             for n in self.nodes.values()
             if n.get("source_folder") in names
         ]

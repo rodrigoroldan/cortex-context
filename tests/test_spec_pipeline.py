@@ -159,7 +159,8 @@ class TestFullIngest:
         assert [(e.from_id, e.relationship, e.to_id) for e in store.edges] == [("spec-861", "DEPENDS_ON", "spec-862")]
 
     @pytest.mark.asyncio
-    async def test_pasta_duplicada_para_o_mesmo_id_vale_a_primeira(self, tmp_path):
+    async def test_numero_repetido_a_primeira_pasta_e_a_dona_e_as_outras_ganham_o_slug(self, tmp_path):
+        """Detalhes e casos de borda em tests/test_spec_numeros_repetidos.py."""
         root = tmp_path / "specs"
         _write(root, "861-a/spec.md", "# A\n\nPrimeira.")
         _write(root, "861-b/spec.md", "# B\n\nSegunda.")
@@ -168,7 +169,9 @@ class TestFullIngest:
         result = await _run(store, root)
 
         assert store.nodes["spec-861"]["title"] == "A"
-        assert result.details["duplicate_folders"] == ["861-b"]
+        assert store.nodes["spec-861-b"]["title"] == "B"
+        assert result.details["duplicate_folders"] == [{"folder": "861-b", "id": "spec-861-b"}]
+        assert "id_collisions" not in result.details
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -264,10 +267,10 @@ class TestFullIngestPrune:
 
         real_parse = parse_spec_folder
 
-        def flaky(folder, dim, parser=None):
+        def flaky(folder, dim, parser=None, **kwargs):
             if folder.name == "862-outra":
                 raise OSError("disco com soluço")
-            return real_parse(folder, dim, parser)
+            return real_parse(folder, dim, parser, **kwargs)
 
         with patch("app.ingestor.spec_pipeline.parse_spec_folder", side_effect=flaky):
             result = await _run(store, specs_root)
@@ -980,6 +983,18 @@ class TestSpecGraphStoreCypher:
             {"from_id": "spec-861", "to_id": "spec-860"},
             {"from_id": "spec-861", "to_id": "spec-859"},
         ]
+
+    @pytest.mark.asyncio
+    async def test_find_nodes_by_folder_devolve_o_source_folder(self):
+        """A incremental compara o id de cada nó com o id que a regra de números repetidos dá à sua pasta."""
+        driver, session = _recording_driver(data=[{"id": "spec-217", "source_folder": "217-a", "has_issue": False, "issue_number": None}])
+
+        rows = await SpecGraphStore(driver, "acme").find_nodes_by_folder(["217-a", "217-b"])
+
+        cypher, params = _last_call(session)
+        assert rows[0]["source_folder"] == "217-a"
+        assert "n.source_folder IN $names" in cypher and "n.source_folder AS source_folder" in cypher
+        assert params == {"domain_id": "acme", "names": ["217-a", "217-b"]}
 
     @pytest.mark.asyncio
     async def test_rebaixar_no_a_so_issue_remove_tambem_o_repos(self):
