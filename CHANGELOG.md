@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it already exists). If a graph has only `spec_fulltext`, run `DROP INDEX spec_fulltext` once and restart.
 - A folder with both `spec.md` and `plan.md` no longer produces two nodes with the same id overwriting
   each other; nested `README.md` files no longer become junk nodes such as `spec-contracts`.
+- Spec folders that share a number (e.g. `217-alpha-draft`, `217-gamma-register`) are no longer dropped: among
+  all folders on disk with the same number, in alphabetical order, the first keeps `spec-NNN` and the others
+  become `spec-NNN-<slug>`, with chunks and cross-references under the new id. The rule is the same on full and
+  incremental runs (an incremental run re-processes the sibling folders of a touched number). An explicit
+  `frontmatter.id` still wins; two equal explicit ids collide and are reported in `details.id_collisions`.
+  `details.duplicate_folders` now lists the re-identified folders as `{folder, id}`.
 
 ## [0.0.1] - 2026-05-16
 

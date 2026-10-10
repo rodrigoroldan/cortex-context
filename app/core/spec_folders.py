@@ -9,6 +9,9 @@ Em vez de um nó por arquivo, todos os .md dentro de uma pasta de spec contribue
   - Arquivo primário (título, summary, frontmatter, status, repos, referências cruzadas):
     spec.md > README.md > plan.md (os três na raiz da pasta) > primeiro em ordem alfabética
     (arquivos da raiz antes dos de subpastas).
+  - Várias pastas com o MESMO número (ex: 217-draft-invite, 217-register-email) não colidem: entre todas as
+    pastas do disco com aquele número, em ordem alfabética, a primeira é `spec-NNN` e as outras
+    `spec-NNN-<slug>` (assign_spec_ids). Um frontmatter.id próprio tem prioridade.
   - O nó ganha `files`, `files_str`, `source_folder`, `primary_file` e `has_folder: true`.
   - Cada arquivo gera seus próprios chunks (DocumentChunk), com id único por arquivo:
     "{spec_id}__{slug-do-arquivo}__chunk_{i}", `source_file`, `parent_id` e `chunk_source: "folder"`.
@@ -23,6 +26,7 @@ import glob
 import logging
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -73,6 +77,45 @@ def spec_id_from_folder_name(folder_name: str, dimension: str = "spec") -> str |
     """'861-split-bill' -> 'spec-861'. None se o nome não for de uma pasta de spec."""
     m = NUMBERED_FOLDER_SLUG.match(folder_name)
     return f"{dimension}-{m.group(1)}" if m else None
+
+
+def spec_number_from_folder_name(folder_name: str) -> str | None:
+    """'861-split-bill' -> '861'. None se o nome não for de uma pasta de spec."""
+    m = NUMBERED_FOLDER_SLUG.match(folder_name)
+    return m.group(1) if m else None
+
+
+def folder_sort_key(name: str) -> tuple[str, str]:
+    """Ordem alfabética das pastas (sem diferenciar maiúsculas, desempate pelo nome exato)."""
+    return (name.casefold(), name)
+
+
+def assign_spec_ids(folder_names: Iterable[str], dimension: str = "spec") -> dict[str, str]:
+    """
+    Id padrão de cada pasta, resolvendo números repetidos de forma determinística.
+
+    Entre TODAS as pastas com o mesmo número, em ordem alfabética, a primeira fica com `spec-NNN` e as
+    demais com `spec-NNN-<slug>` (slug = resto do nome da pasta). A decisão só olha os NOMES das pastas
+    presentes no disco — por isso é a mesma na ingestão completa e na incremental, que recebe a listagem
+    inteira mesmo tocando poucas pastas. Um frontmatter.id próprio (diferente de `spec-NNN`) tem prioridade
+    sobre este id, mas não "libera" o `spec-NNN` para a próxima pasta (ver parse_spec_folder).
+    """
+    by_number: dict[str, list[str]] = {}
+    for name in sorted(set(folder_names), key=folder_sort_key):
+        number = spec_number_from_folder_name(name)
+        if number is not None:
+            by_number.setdefault(number, []).append(name)
+
+    ids: dict[str, str] = {}
+    for number, names in by_number.items():
+        for position, name in enumerate(names):
+            if position == 0:
+                ids[name] = f"{dimension}-{number}"
+            else:
+                # "__" no id quebraria o marcador "__chunk_" dos chunks (a busca filtra por ele)
+                slug = re.sub(r"_{2,}", "_", NUMBERED_FOLDER_SLUG.match(name).group(2))
+                ids[name] = f"{dimension}-{number}-{slug}"
+    return ids
 
 
 # ─── Mapeamento caminho -> pasta ──────────────────────────────────────────────
@@ -165,7 +208,7 @@ def discover_spec_folders(
             continue
         folder.files.append(file_path)
 
-    return {name: folders[name] for name in sorted(folders)}
+    return {name: folders[name] for name in sorted(folders, key=folder_sort_key)}
 
 
 # ─── Parse de uma pasta ───────────────────────────────────────────────────────
@@ -207,9 +250,15 @@ def parse_spec_folder(
     folder: SpecFolder,
     dimension_config: "DimensionConfig",
     parser: MarkdownFrontmatterParser | None = None,
+    *,
+    spec_id: str | None = None,
 ) -> SpecFolderParse | None:
     """
     Gera o nó Spec (+ chunks por arquivo) de uma pasta. Retorna None se nenhum arquivo for legível.
+
+    `spec_id` é o id que a regra de números repetidos (assign_spec_ids) atribuiu à pasta; ele substitui o
+    padrão `spec-NNN` — inclusive nos chunks e nas referências cruzadas do arquivo primário. Um
+    frontmatter.id diferente de `spec-NNN` continua tendo prioridade.
     """
     parser = parser or MarkdownFrontmatterParser()
 
@@ -230,7 +279,9 @@ def parse_spec_folder(
     primary = choose_primary(rels)
     primary_path = folder.path / primary
 
-    result: ParseResult = parser.parse(primary_path, dimension_config, folder_name=folder.name, emit_chunks=False)
+    result: ParseResult = parser.parse(
+        primary_path, dimension_config, folder_name=folder.name, emit_chunks=False, default_id=spec_id
+    )
     if not result.nodes:
         return None
     node = result.nodes[0]
