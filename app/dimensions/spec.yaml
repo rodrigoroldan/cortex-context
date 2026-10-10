@@ -93,10 +93,14 @@ indexes:
   - type: constraint_unique
     property: id
     cypher: "CREATE CONSTRAINT spec_id IF NOT EXISTS FOR (n:Spec) REQUIRE n.id IS UNIQUE"
+  # Nome que GET /api/v1/query consulta (app/routes/query.py). Antes o YAML criava "spec_fulltext", então
+  # num ambiente novo a busca por título/summary voltava sempre vazia. Não declaramos os dois: o Neo4j não
+  # cria um índice fulltext equivalente (mesmo schema) com outro nome. Num grafo que já tem spec_fts, ou
+  # os dois, isto é um no-op; se só existir spec_fulltext, faça uma vez `DROP INDEX spec_fulltext` e reinicie.
   - type: fulltext
-    name: spec_fulltext
+    name: spec_fts
     properties: [title, summary, labels_str]
-    cypher: "CREATE FULLTEXT INDEX spec_fulltext IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]"
+    cypher: "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]"
   - type: fulltext
     name: doc_chunk_fts
     properties: [content]

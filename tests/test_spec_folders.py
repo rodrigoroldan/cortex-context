@@ -82,6 +82,32 @@ class TestSpecDimensionYaml:
         cyphers = " ".join(i.cypher for i in dim.indexes)
         assert "CREATE FULLTEXT INDEX doc_chunk_fts IF NOT EXISTS FOR (n:DocumentChunk) ON EACH [n.content]" in cyphers
 
+    def test_spec_yaml_cria_o_indice_spec_fts_que_o_query_consulta(self):
+        dim = load_dimension(SPEC_YAML)
+        cyphers = [i.cypher for i in dim.indexes]
+        assert (
+            "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]" in cyphers
+        )
+        # idempotente e sem o nome antigo: não pode existir um índice equivalente com outro nome
+        assert all("IF NOT EXISTS" in c for c in cyphers)
+        assert not any("spec_fulltext" in c for c in cyphers)
+
+    def test_todo_indice_fulltext_consultado_pelo_query_e_criado_por_algum_yaml(self):
+        """Guarda contra a deriva que quebrou a busca (spec_fts consultado, spec_fulltext criado)."""
+        import re
+
+        query_src = (SPEC_YAML.parent.parent / "routes" / "query.py").read_text(encoding="utf-8")
+        used = set(re.findall(r'"(\w+)"', re.search(r"fts_indexes = \[([^\]]+)\]", query_src).group(1)))
+        used.add(re.search(r'_CHUNK_FTS_INDEX = "(\w+)"', query_src).group(1))
+        assert used == {"spec_fts", "service_fulltext", "workflow_fulltext", "doc_chunk_fts"}
+
+        created: set[str] = set()
+        for yaml_path in SPEC_YAML.parent.glob("*.yaml"):
+            dim = load_dimension(yaml_path)
+            for idx in dim.indexes if dim else []:
+                created.update(re.findall(r"CREATE FULLTEXT INDEX (\w+)", idx.cypher))
+        assert used <= created, f"índices consultados e não criados por nenhum dimension YAML: {used - created}"
+
     @pytest.mark.parametrize("name", ["adr", "concept", "history", "workflow", "service"])
     def test_outras_dimensoes_nao_usam_group_by(self, name):
         dim = load_dimension(SPEC_YAML.parent / f"{name}.yaml")

@@ -73,3 +73,16 @@ def test_startup_applies_doc_chunk_fulltext_and_parent_indexes(mock_neo4j_driver
     executed_cypher = " ".join(str(call.args[0]) for call in mock_session.run.call_args_list)
     assert "CREATE FULLTEXT INDEX doc_chunk_fts IF NOT EXISTS FOR (n:DocumentChunk) ON EACH [n.content]" in executed_cypher
     assert "CREATE INDEX documentchunk_parent_id_idx IF NOT EXISTS FOR (n:DocumentChunk) ON (n.parent_id)" in executed_cypher
+
+
+def test_startup_cria_spec_fts_que_o_query_consulta(mock_neo4j_driver):
+    """/query busca título/summary no índice `spec_fts`; o startup tem que criá-lo (IF NOT EXISTS)."""
+    driver, mock_session = mock_neo4j_driver
+
+    app = create_app()
+    with TestClient(app):
+        pass
+
+    executed = [str(call.args[0]) for call in mock_session.run.call_args_list]
+    assert "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]" in executed
+    assert not any("spec_fulltext" in q for q in executed)
