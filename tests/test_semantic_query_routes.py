@@ -92,6 +92,7 @@ async def test_query_context_expand_with_no_relationships_keeps_seed_nodes():
             [fts_record],  # spec_fulltext
             [],  # service_fulltext
             [],  # workflow_fulltext
+            [],  # doc_chunk_fts (busca no corpo)
             [{"nodes": [seed_node], "edges": []}],  # expand
         ]
     )
@@ -162,11 +163,11 @@ async def test_query_context_bounds_response_time_when_driver_hangs():
             result = MagicMock()
             result.data = AsyncMock(return_value=[fts_record])
             return result
-        if call_count in (2, 3):
+        if call_count in (2, 3, 4):  # 2-3: service/workflow FTS; 4: busca no corpo (doc_chunk_fts)
             result = MagicMock()
             result.data = AsyncMock(return_value=[])
             return result
-        # 4th call = the expand query: simulates the driver hanging even though
+        # 5th call = the expand query: simulates the driver hanging even though
         # the Neo4j server already terminated the transaction on its own timeout.
         await asyncio.sleep(3600)
 
