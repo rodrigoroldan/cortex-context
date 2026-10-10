@@ -5,11 +5,20 @@
 # Representa o "Por Quê" do sistema. Qualquer documento que captura
 # intenção de produto: specs, requisitos, épicos, user stories, RFCs.
 #
-# Cada arquivo gera um nó (:Spec:Intent) com:
-#   id     → spec-{NNN} ou spec-{slug}
-#   title  → # H1 ou frontmatter.title
-#   status → frontmatter.status ou "unknown"
+# Spec = PASTA (group_by: numbered_folder): todos os .md dentro de uma pasta
+# numerada ("NNN-slug", 3+ dígitos) contribuem para UM nó (:Spec:Intent):
+#   id     → spec-{NNN} (ou frontmatter.id do arquivo primário)
+#   title  → frontmatter.title ou # H1 do arquivo primário
+#   status → frontmatter.status ou inferido do corpo do arquivo primário
 #   labels → inferidos do slug + frontmatter.labels
+#   files / files_str / source_folder / has_folder → descrevem a pasta
+# O arquivo primário é spec.md > README.md > plan.md (raiz da pasta) > o
+# primeiro em ordem alfabética. Arquivos fora de pasta numerada são ignorados.
+# Cada .md gera DocumentChunk (spec-NNN__<arquivo>__chunk_<i>) indexados no
+# fulltext doc_chunk_fts — é o que permite achar texto do corpo por keyword.
+#
+# Specs também podem vir de issues do GitHub (cortex.config.yaml → spec_issues);
+# elas enriquecem o mesmo nó com issue_* — ver docs/DIMENSION-SCHEMA.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 dimension: spec
@@ -18,10 +27,9 @@ pillar: Intent
 parser: builtin.markdown_frontmatter
 source_type: filesystem
 source_path: "/specs"
+group_by: numbered_folder
 source_patterns:
-  - "**/plan.md"
-  - "**/spec.md"
-  - "**/README.md"
+  - "**/*.md"
 
 fields:
   - name: id
@@ -41,6 +49,18 @@ fields:
   - name: labels
     type: list[string]
     description: "Tags semânticas inferidas do slug e do frontmatter"
+  - name: files
+    type: list[string]
+    description: "Arquivos .md da pasta da spec, relativos a ela (ex: RUNBOOK.md, contracts/api.md)"
+  - name: source_folder
+    type: string
+    description: "Nome da pasta da spec (ex: 861-split-bill)"
+  - name: has_folder
+    type: boolean
+    description: "true quando o nó tem pasta no filesystem (a pasta manda em title/summary/status)"
+  - name: has_issue
+    type: boolean
+    description: "true quando o nó tem issue do GitHub (issue_number, issue_url, issue_state, issue_state_reason, issue_updated_at)"
 
 relationships:
   - type: DEPENDS_ON
@@ -73,7 +93,19 @@ indexes:
   - type: constraint_unique
     property: id
     cypher: "CREATE CONSTRAINT spec_id IF NOT EXISTS FOR (n:Spec) REQUIRE n.id IS UNIQUE"
+  # Nome que GET /api/v1/query consulta (app/routes/query.py). Antes o YAML criava "spec_fulltext", então
+  # num ambiente novo a busca por título/summary voltava sempre vazia. Não declaramos os dois: o Neo4j não
+  # cria um índice fulltext equivalente (mesmo schema) com outro nome. Num grafo que já tem spec_fts, ou
+  # os dois, isto é um no-op; se só existir spec_fulltext, faça uma vez `DROP INDEX spec_fulltext` e reinicie.
   - type: fulltext
-    name: spec_fulltext
+    name: spec_fts
     properties: [title, summary, labels_str]
-    cypher: "CREATE FULLTEXT INDEX spec_fulltext IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]"
+    cypher: "CREATE FULLTEXT INDEX spec_fts IF NOT EXISTS FOR (n:Spec) ON EACH [n.title, n.summary, n.labels_str]"
+  - type: fulltext
+    name: doc_chunk_fts
+    properties: [content]
+    cypher: "CREATE FULLTEXT INDEX doc_chunk_fts IF NOT EXISTS FOR (n:DocumentChunk) ON EACH [n.content]"
+  - type: index
+    name: documentchunk_parent_id_idx
+    property: parent_id
+    cypher: "CREATE INDEX documentchunk_parent_id_idx IF NOT EXISTS FOR (n:DocumentChunk) ON (n.parent_id)"

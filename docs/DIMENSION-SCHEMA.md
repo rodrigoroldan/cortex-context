@@ -44,6 +44,7 @@ source_pattern: <glob>   # Glob único (alternativa a source_patterns)
 source_patterns:         # Lista de globs para múltiplos padrões
   - "**/*.md"
   - "**/plan.md"
+group_by: <string>       # (opcional) numbered_folder — ver abaixo. Vazio = um nó por arquivo
 
 # ── Campos extraídos ─────────────────────────────────────────────────────────
 fields:
@@ -102,6 +103,14 @@ CHUNK_OF            DocumentChunk → *        — Chunk pertence ao nó pai (Ve
 ### `builtin.markdown_frontmatter`
 
 Parser genérico para qualquer arquivo Markdown com ou sem frontmatter YAML.
+
+**`group_by: numbered_folder`** (usado pela dimensão `spec`): em vez de um nó por arquivo, todos os
+`.md` dentro de uma pasta cujo nome casa `^\d{3,}-` contribuem para UM nó `spec-NNN`. O arquivo primário
+(`spec.md` > `README.md` > `plan.md` > primeiro em ordem alfabética) define título, summary, status,
+frontmatter, `repos` e referências cruzadas; o nó ganha `files`, `files_str`, `source_folder` e
+`has_folder: true`; e cada arquivo gera `DocumentChunk` próprios (`spec-NNN__<arquivo>__chunk_<i>`,
+`source_file`, `chunk_source: "folder"`), sempre — com ou sem embedder. Arquivos fora de pasta numerada
+são ignorados. Sem `group_by`, o parser se comporta exatamente como antes (adr, concept, history, workflow).
 
 **Extrai automaticamente**:
 - Frontmatter YAML (bloco `---`) — título, status, date, summary, labels

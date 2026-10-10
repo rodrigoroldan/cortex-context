@@ -68,7 +68,13 @@ async def test_adversarial_2hop_traversal_cross_domain_leak():
         ]
     }])
 
-    mock_session.run = AsyncMock(side_effect=[mock_fts_result, mock_expand_result, mock_fts_result, mock_fts_result])
+    # Busca no corpo (doc_chunk_fts): sem hits, depois a expansão — na mesma ordem em que a rota executa.
+    mock_chunk_result = MagicMock()
+    mock_chunk_result.data = AsyncMock(return_value=[])
+
+    mock_session.run = AsyncMock(
+        side_effect=[mock_fts_result, mock_expand_result, mock_fts_result, mock_chunk_result, mock_fts_result]
+    )
 
     from app.db import neo4j as neo4j_module
     old_driver = neo4j_module._driver

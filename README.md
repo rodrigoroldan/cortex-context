@@ -166,7 +166,7 @@ Copy `.env.example` to `.env` and set the required values:
 | `CORTEX_PORT`      | API port                                              | `8082`                  |
 | `SPECS_DIR`        | Path to your specs directory (mounted into container) | `/specs`                |
 | `REPOS_DIR`        | Path to repos with service manifests (optional)       | `/repos`                |
-| `GITHUB_TOKEN`     | GitHub token for `source_type: github_api` (optional) | —                       |
+| `GITHUB_TOKEN`     | GitHub token for `source_type: github_api` and `spec_issues` (optional) | —                       |
 | `CODE_INGEST_MAX_ITEMS` | Max combined files+symbols+calls+links per `POST /code/ingest` request — rejected with `413` above this (split into smaller chunks client-side) | `10000` |
 
 **Vector RAG (optional):**
@@ -221,8 +221,8 @@ See [`cortex.config.yaml`](cortex.config.yaml) for the full annotated config.
 
 | Method | Endpoint                   | Description                                          |
 | ------ | -------------------------- | ---------------------------------------------------- |
-| `POST` | `/api/v1/ingest/{dim_key}` | Ingest a specific dimension (e.g. `spec`, `service`) |
-| `POST` | `/api/v1/ingest`           | Ingest all active dimensions                         |
+| `POST` | `/api/v1/ingest/{dim_key}` | Ingest a specific dimension (e.g. `spec`, `service`). `spec` also accepts an optional JSON body for **incremental** ingestion — see [Specs as folders](#specs-as-folders-and-github-issues) |
+| `POST` | `/api/v1/ingest`           | Ingest all active dimensions (a full `spec` ingestion, with pruning) |
 | `POST` | `/api/v1/ingest/manifest`  | Bulk upsert of pre-computed `nodes`/`edges`, any dimension |
 | `POST` | `/api/v1/code/ingest`      | Bulk upsert of a pre-computed AST/call-graph (files, symbols, calls) |
 
@@ -241,6 +241,65 @@ relationship type) instead of one Neo4j session per node/edge, so large ASTs don
 to be chunked for performance — `CODE_INGEST_MAX_ITEMS` (default `10000`) is only a hard
 backstop against pathologically large single requests, not a tuning knob you need to hit.
 
+#### Specs as folders and GitHub issues
+
+The `spec` dimension (`group_by: numbered_folder`) treats a **folder** as the unit of a spec: every
+`.md` file (recursively) inside a folder named `NNN-slug` (3+ digits) contributes to one `(:Spec)`
+node `spec-NNN`. Files outside a numbered folder are ignored, and a nested `README.md` is just another
+file of its spec, not a spec of its own.
+
+- **Primary file** (title, summary, frontmatter, status, `repos`, cross-references): `spec.md` >
+  `README.md` > `plan.md` (folder root) > first in alphabetical order.
+- The node also carries `files`, `files_str`, `source_folder` and `has_folder: true`. Files larger than
+  1 MB are skipped.
+- Every file is split into `DocumentChunk` nodes (`spec-NNN__<file-slug>__chunk_<i>`, with
+  `source_file` and `chunk_source: "folder"`) — **always**, with or without an embedder. They feed the
+  `doc_chunk_fts` full-text index; embeddings stay optional and computed in the background.
+
+**Incremental ingestion** — `POST /api/v1/ingest/spec` with an optional JSON body:
+
+```json
+{ "spec_paths": ["specs/861-example/RUNBOOK.md", "862-other/spec.md"], "issue_numbers": [861] }
+```
+
+Paths may be relative to the repo (`specs/…`) or to the specs folder; the closest `\d{3,}-…` segment
+names the spec folder. Only the affected folders are re-parsed (their old folder chunks are deleted
+first, so removed or shrunk files leave nothing behind); a folder that no longer exists on disk has its
+chunks deleted and, unless it has issue data, its node too. Paths that do not map to a spec folder are
+returned in `details.ignored_paths`. Incremental runs do not sweep for stale data: they only remove
+what the request itself covers (listed folders that vanished, listed issues that lost the label).
+
+With no body (or an empty one) the whole dimension is ingested, then **pruned**: Spec nodes of folder
+origin that were not rewritten in this run (and have no issue data) are deleted with their chunks —
+this also cleans up nodes created by the old one-node-per-file parser. Nothing is pruned if the specs
+directory is missing or contains no spec folder (e.g. a volume that failed to mount).
+
+At the end of every spec ingestion the `AFFECTS` edges (`Spec` → `Service`, from the spec's `repos`) are
+recomputed — for all specs on a full run, only for the touched specs on an incremental one. The old
+`AFFECTS` of those specs that this mechanism created are removed first, so a repo dropped from the
+frontmatter leaves no stale edge (edges created through `/ingest/manifest` or by hand are kept).
+
+Response `details`: `folders_parsed`, `folders_deleted`, `chunks_upserted`, `issues_parsed`,
+`issues_error`, `ignored_paths`, `pruned_nodes` (plus `mode`, `affects_edges`, `files_parsed`, `warnings`, …).
+
+**Specs from GitHub issues** (optional) — set the repo in `cortex.config.yaml` (empty = off) and put a
+`GITHUB_TOKEN` in `.env` for private repos (read access to issues):
+
+```yaml
+spec_issues:
+  repo: "acme/specs-repo"
+  label: "spec"
+```
+
+Issues with the label (open or closed; PRs are ignored) become `(:Spec)` nodes. The spec number is the
+`NNN` in a title like `Spec NNN — <title>` (falling back to the issue number, zero-padded to 3 digits).
+The node gets `issue_number`, `issue_url`, `issue_state`, `issue_state_reason`, `issue_updated_at`,
+`has_issue: true` and chunks of the issue body (`spec-NNN__issue__chunk_<i>`, `source_file: "issue#N"`).
+If the spec has **no folder**, the issue also sets `title`, `summary` (first ~300 chars) and `status`
+(`open` → `planned`, closed as completed → `done`, closed as not planned → `deprecated`); if it has a
+folder, the folder wins. An issue that loses the label is pruned on the next full run. GitHub failures
+(401, network) never abort the ingestion — they are reported in `details.issues_error`.
+
 ### Full-Text Search
 
 | Method | Endpoint        | Description                                    |
@@ -248,6 +307,17 @@ backstop against pathologically large single requests, not a tuning knob you nee
 | `GET`  | `/api/v1/query` | Cross-dimension FTS with 1-hop graph expansion |
 
 **Query params**: `keywords` (required), `limit` (default `8`), `hops` (default `1`), `pillar` (`Intent|System|Implementation|Runtime`), `dimension` (`spec|service|...`)
+
+Besides title/summary/labels, the query also searches the **body** of specs (`doc_chunk_fts`) — always,
+not only when the title search leaves room: each matching chunk adds its parent spec as a seed (if it is not
+one already), up to `max(2, limit // 3)` body specs **on top of** the title hits, so the total can exceed
+`limit`. The default tokenizer splits `https://api-staging.example.dev/x` into `api` + `staging.example.dev`,
+so a search for `api-staging` matches `api` in hundreds of chunks; the query therefore fetches more
+candidates (`max(limit * 10, 50)`) and ranks chunks that contain a keyword **literally** (case-insensitive
+substring) before the rest, then by score. Such nodes carry `match_snippet` (`"<source_file>:
+…excerpt…"`, anchored on the literal occurrence when there is one), and the same excerpt is appended to the
+`summary` **in the response only** (`summary + "\n> 🔎 <source_file>: …excerpt…"`) so clients that only
+display `summary` still show why the spec matched. Nothing is written to the graph.
 
 ### Semantic Search (Vector RAG)
 
@@ -286,7 +356,7 @@ Returns `503` when `CORTEX_EMBEDDING_PROVIDER=none`.
 
 | Dimension  | Pillar         | Parser                         | Default source                                       |
 | ---------- | -------------- | ------------------------------ | ---------------------------------------------------- |
-| `spec`     | Intent         | `builtin.markdown_frontmatter` | `specs/**/plan.md` (filesystem)                      |
+| `spec`     | Intent         | `builtin.markdown_frontmatter` | `**/*.md` in numbered folders `NNN-slug/` (filesystem, one node per folder) + optional GitHub issues |
 | `service`  | System         | `builtin.agents_manifest`      | `AGENTS.md` / `agents.md` (github_api or filesystem) |
 | `workflow` | Implementation | `builtin.markdown_frontmatter` | `**/temporal/**/*.yaml`, `**/workflows/**/*.md`      |
 | `adr`      | System         | `builtin.markdown_frontmatter` | `**/docs/adr/**/*.md`                                |
@@ -376,7 +446,7 @@ Zero extra discipline: just follow the `feature/<NNN>-slug` convention. The CLI 
 
 ### Cross-Repo Spec Tracking
 
-A `repos:` field in `plan.md` frontmatter creates `(:Spec)-[:AFFECTS]->(:Service)` edges, connecting specs to the services they impact:
+A `repos:` field in the spec's primary file (`spec.md`, `README.md` or `plan.md`) frontmatter creates `(:Spec)-[:AFFECTS]->(:Service)` edges, connecting specs to the services they impact:
 
 ```yaml
 # specs/070-payments/plan.md

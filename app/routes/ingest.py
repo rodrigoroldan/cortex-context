@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import httpx
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Query, Security, status, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -25,7 +25,10 @@ from app.core.glob_filter import filter_excluded_paths
 from app.core.graph_builder import ingest_chunks, ingest_edges, ingest_nodes  # noqa: F401
 from app.core.parser_registry import get_parser
 from app.core.parsers.manifest import IngestManifest, ManifestIngestResponse
+from app.core.spec_folders import GROUP_BY_NUMBERED_FOLDER
 from app.db.neo4j import apply_index, get_driver
+from app.ingestor.relationship_builder import rebuild_spec_affects
+from app.ingestor.spec_pipeline import SpecGraphStore, SpecIngestRequest, run_spec_ingest
 from app.routes.dependencies import get_domain_id
 
 logger = logging.getLogger(__name__)
@@ -138,15 +141,65 @@ class BulkIngestResponse(BaseModel):
 # ─── Core ingest pipeline ─────────────────────────────────────────────────────
 
 
+async def _run_spec_folder_pipeline(
+    dim_config: DimensionConfig,
+    driver: Any,
+    background_tasks: BackgroundTasks | None,
+    domain_id: str,
+    cfg: dict,
+    spec_request: SpecIngestRequest | None,
+    indexes_applied: int,
+) -> IngestResponse:
+    """Dimensões com `group_by: numbered_folder` (spec = pasta): ver app/ingestor/spec_pipeline.py."""
+    result = await run_spec_ingest(
+        SpecGraphStore(driver, domain_id),
+        dim_config,
+        cfg=cfg,
+        request=spec_request,
+        github_token=get_settings().github_token,
+        exclude_patterns=_get_exclude_patterns(cfg),
+    )
+
+    # Embeddings (opcionais) seguem em background, como nas demais dimensões.
+    if result.embedding_chunks and background_tasks:
+        background_tasks.add_task(_process_embeddings_bg, result.embedding_chunks, domain_id)
+
+    d = result.details
+    return IngestResponse(
+        dim_key=dim_config.dimension,
+        domain_id=domain_id,
+        nodes_upserted=result.nodes_upserted,
+        edges_upserted=result.edges_upserted,
+        indexes_applied=indexes_applied,
+        message=(
+            f"Dimensão '{dim_config.dimension}' ingerida (domain: {domain_id}, modo: {d['mode']}): "
+            f"{d['folders_parsed']} pastas, {d['issues_parsed']} issues, {d['chunks_upserted']} chunks, "
+            f"{d['folders_deleted']} pastas removidas, {d['pruned_nodes']} nós podados"
+        ),
+        details={
+            **d,
+            "source_type": dim_config.source_type,
+            "source_path": dim_config.source_path or None,
+            "parser": dim_config.parser,
+            "pillar": dim_config.pillar,
+            "domain_id": domain_id,
+        },
+    )
+
+
 async def _run_ingest_pipeline(
     dim_config: DimensionConfig,
     plugins_dir: Path | None = None,
     background_tasks: BackgroundTasks | None = None,
     domain_id: str = "default",
     cfg: dict | None = None,
+    spec_request: SpecIngestRequest | None = None,
 ) -> IngestResponse:
     """
     Executa o pipeline completo de ingestão para uma única dimensão com isolamento por domain_id.
+
+    `spec_request` (spec_paths/issue_numbers) só tem efeito em dimensões `group_by: numbered_folder`;
+    sem ele a dimensão é ingerida por inteiro (e podada).
     """
     cfg = cfg or {}
     exclude_patterns = _get_exclude_patterns(cfg)
@@ -165,6 +218,17 @@ async def _run_ingest_pipeline(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Parser '{dim_config.parser}' não encontrado para dimensão '{dim_config.dimension}'",
+        )
+
+    # Dimensão "spec = pasta": pipeline próprio (agrupa por pasta, issues, incremental, poda).
+    if dim_config.group_by == GROUP_BY_NUMBERED_FOLDER:
+        if dim_config.parser != "builtin.markdown_frontmatter":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"group_by '{GROUP_BY_NUMBERED_FOLDER}' requer parser builtin.markdown_frontmatter",
+            )
+        return await _run_spec_folder_pipeline(
+            dim_config, driver, background_tasks, domain_id, cfg, spec_request, indexes_applied
         )
 
     # `ingest_strategy: github` (cortex.config.yaml) força dimensões agents_manifest
@@ -465,11 +529,18 @@ async def ingest_manifest(
     "/ingest/{dim_key}",
     response_model=IngestResponse,
     summary="Ingesta uma dimensão específica",
-    description="Carrega a DimensionConfig do YAML, resolve o parser e executa o pipeline de ingestão.",
+    description=(
+        "Carrega a DimensionConfig do YAML, resolve o parser e executa o pipeline de ingestão.\n\n"
+        "Para a dimensão `spec` (spec = pasta) o corpo JSON é opcional: "
+        "`{\"spec_paths\": [...], \"issue_numbers\": [...]}` faz uma ingestão INCREMENTAL (só as pastas e "
+        "issues afetadas, sem poda). Sem corpo (ou corpo vazio) a dimensão é ingerida por inteiro e o que "
+        "sumiu da fonte é podado. Dimensões sem `group_by` ignoram o corpo."
+    ),
 )
 async def ingest_dimension(
     dim_key: str,
     background_tasks: BackgroundTasks,
+    body: SpecIngestRequest | None = Body(default=None),
     domain_id: str = Depends(get_domain_id),
     _token: str = Depends(_verify_token),
 ):
@@ -494,7 +565,9 @@ async def ingest_dimension(
             detail=f"Dimension YAML não encontrado ou inválido para '{dim_key}'",
         )
 
-    return await _run_ingest_pipeline(dims[0], plugins_dir, background_tasks, domain_id=domain_id, cfg=cfg)
+    return await _run_ingest_pipeline(
+        dims[0], plugins_dir, background_tasks, domain_id=domain_id, cfg=cfg, spec_request=body
+    )
 
 
 @router.post(
@@ -541,25 +614,11 @@ async def ingest_all(
                 message=f"Erro: {e}",
             ))
 
-    # Pós-processamento: AFFECTS edges (Spec → Service) via Cypher (filtrado por domain_id)
+    # Pós-processamento: AFFECTS edges (Spec → Service), filtrado por domain_id. Os Services podem ter sido
+    # ingeridos depois das specs nesta mesma execução, então o recálculo completo roda aqui também.
     affects_created = 0
     try:
-        driver = get_driver()
-        async with driver.session() as session:
-            result_affects = await session.run(
-                """
-                MATCH (spec:Spec {domain_id: $domain_id}) WHERE spec.repos IS NOT NULL AND size(spec.repos) > 0
-                UNWIND spec.repos AS repo
-                MATCH (svc:Service {domain_id: $domain_id}) WHERE svc.repo = repo
-                MERGE (spec)-[r:AFFECTS]->(svc)
-                ON CREATE SET r.created_at = datetime(), r.domain_id = $domain_id
-                RETURN count(r) AS created
-                """,
-                domain_id=domain_id,
-            )
-            record = await result_affects.single()
-            affects_created = record["created"] if record else 0
-            logger.info("AFFECTS edges (Spec→Service, domain: %s): %d criadas/verificadas", domain_id, affects_created)
+        affects_created = await rebuild_spec_affects(get_driver(), domain_id)
     except Exception as e:
         logger.error("Erro ao criar AFFECTS edges: %s", e)
 

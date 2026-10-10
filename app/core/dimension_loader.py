@@ -76,6 +76,17 @@ class DimensionConfig:
         """Retorna a lista de labels multi-label: [entity_label, pillar_label]."""
         return [self.node_label, self.pillar]
 
+    @property
+    def group_by(self) -> str:
+        """
+        Estratégia de agrupamento de arquivos em nós (chave opcional `group_by` do YAML).
+
+        Vazio (padrão): um nó por arquivo. "numbered_folder": todos os .md dentro de
+        uma pasta numerada (ex: "861-slug") contribuem para um único nó — ver
+        app/core/spec_folders.py.
+        """
+        return str(self.extra.get("group_by") or "")
+
 
 def _parse_field(raw: dict) -> FieldConfig:
     return FieldConfig(

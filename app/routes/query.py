@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
@@ -61,6 +62,8 @@ class NodeContext(BaseModel):
     title: str = ""
     summary: str = ""
     status: str = ""
+    # Só nos seeds achados pelo corpo (índice doc_chunk_fts): "<arquivo>: …trecho…".
+    match_snippet: str | None = None
 
 
 class EdgeContext(BaseModel):
@@ -113,6 +116,63 @@ def _neo4j_node_to_context(node_data: dict, labels: list[str]) -> NodeContext:
 def _estimate_tokens(nodes: list[NodeContext]) -> int:
     total = sum(len(n.title) + len(n.summary) + len(n.id) + 20 for n in nodes)
     return total // 4
+
+
+# Índice fulltext do corpo das specs (DocumentChunk.content) — criado em app/dimensions/spec.yaml.
+_CHUNK_FTS_INDEX = "doc_chunk_fts"
+_SNIPPET_CHARS = 240
+_LUCENE_NOISE = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
+
+
+def _literal_keywords(keyword_list: list[str]) -> list[str]:
+    """Keywords como o usuário digitou (minúsculas, sem aspas em volta), para casar por substring."""
+    literals: list[str] = []
+    for kw in keyword_list:
+        lit = kw.strip().strip('"').strip().lower()
+        if lit and lit not in literals:
+            literals.append(lit)
+    return literals
+
+
+def _snippet_terms(keyword_list: list[str]) -> list[str]:
+    """Termos para localizar no texto: cada keyword inteira e suas palavras (a busca fulltext casa por token)."""
+    terms: list[str] = []
+    for kw in keyword_list:
+        cleaned = _LUCENE_NOISE.sub(" ", kw).strip()
+        for term in [cleaned, *cleaned.split()]:
+            if len(term) >= 2 and term.lower() not in {t.lower() for t in terms}:
+                terms.append(term)
+    return terms
+
+
+def _first_position(lowered: str, terms: list[str]) -> int:
+    """Menor índice em que algum dos termos aparece em `lowered` (-1 se nenhum)."""
+    first = -1
+    for term in terms:
+        pos = lowered.find(term.lower())
+        if pos != -1 and (first == -1 or pos < first):
+            first = pos
+    return first
+
+
+def _build_match_snippet(content: str, source_file: str, keyword_list: list[str], width: int = _SNIPPET_CHARS) -> str:
+    """
+    "<source_file>: …<trecho>…" — ~`width` caracteres em volta da primeira ocorrência de uma keyword.
+
+    A ocorrência LITERAL da keyword (ex: "api-staging") tem prioridade: o analyzer do fulltext quebra
+    "https://api-staging.exemplo.dev" em tokens soltos, e ancorar o trecho em "api" mostraria um lugar
+    qualquer do texto. Sem literal, tenta as palavras da keyword (sem operadores Lucene) e, sem
+    ocorrência nenhuma, usa o início do texto.
+    """
+    text = re.sub(r"\s+", " ", content or "").strip()
+    lowered = text.lower()  # lower() (e não casefold) para que os índices valham também em `text`
+    first = _first_position(lowered, _literal_keywords(keyword_list))
+    if first == -1:
+        first = _first_position(lowered, _snippet_terms(keyword_list))
+    start = max(first - width // 3, 0) if first != -1 else 0
+    snippet = text[start : start + width].strip()
+    prefix = f"{source_file}: " if source_file else ""
+    return f"{prefix}…{snippet}…"
 
 
 def _merge_nodes_priority(nodes: list[NodeContext], branch: str) -> list[NodeContext]:
@@ -238,6 +298,90 @@ async def _run_query_context(
             except Exception:
                 pass
 
+        # ── Seed: corpo das specs (chunks) ─────────────────────────────────────
+        # Roda SEMPRE: os 3 índices de título costumam encher `limit` sozinhos, e o corpo não pode
+        # depender de sobra. Cada chunk achado vira seed do seu pai (se ainda não for seed), até
+        # max(2, limit // 3) pais de corpo ALÉM dos seeds de título — o total pode passar de `limit`.
+        # Cada seed de corpo guarda o trecho que casou.
+        body_snippets: dict[str, str] = {}
+        body_quota = max(2, limit // 3)
+        try:
+            chunk_result = await session.run(
+                f"""
+                CALL db.index.fulltext.queryNodes('{_CHUNK_FTS_INDEX}', $query)
+                YIELD node, score
+                WHERE (node.domain_id = $domain_id OR ($domain_id = 'default' AND node.domain_id IS NULL))
+                  AND (node.branch = $branch OR node.branch = 'main' OR node.branch IS NULL OR node.is_draft = false)
+                  AND node.parent_id IS NOT NULL
+                RETURN node.parent_id AS parent_id,
+                       node.source_file AS source_file,
+                       node.content AS content,
+                       score
+                ORDER BY score DESC
+                LIMIT $chunk_limit
+                """,
+                {
+                    "query": fts_query,
+                    "chunk_limit": max(limit * 10, 50),
+                    "domain_id": domain_id,
+                    "branch": branch,
+                },
+            )
+            chunk_hits = await chunk_result.data()
+
+            # O analyzer padrão quebra "https://api-staging.exemplo.dev/x" em "api" + "staging.exemplo.dev":
+            # uma busca por "api-staging" casa por "api" em centenas de chunks e o score sozinho não põe o
+            # que tem o texto literal na frente. Chunks com a keyword literal (substring, sem diferenciar
+            # maiúsculas) vêm primeiro; dentro de cada grupo vale a ordem de score (sort estável).
+            literals = _literal_keywords(keyword_list)
+            chunk_hits = sorted(
+                chunk_hits,
+                key=lambda h: 0 if any(lit in str(h.get("content") or "").lower() for lit in literals) else 1,
+            )
+
+            # pai -> melhor chunk (o primeiro da ordem acima)
+            best_chunk: dict[str, dict] = {}
+            for hit in chunk_hits:
+                parent_id = hit.get("parent_id")
+                if parent_id and parent_id not in best_chunk:
+                    best_chunk[parent_id] = hit
+            new_parent_ids = [pid for pid in best_chunk if pid not in seed_props]
+
+            if new_parent_ids:
+                parent_result = await session.run(
+                    """
+                    MATCH (p) WHERE p.id IN $parent_ids AND NOT p:DocumentChunk
+                      AND (p.domain_id = $domain_id OR ($domain_id = 'default' AND p.domain_id IS NULL))
+                      AND (p.branch = $branch OR p.branch = 'main' OR p.branch IS NULL OR p.is_draft = false)
+                    RETURN p {.*} AS props, labels(p) AS labels
+                    """,
+                    {"parent_ids": new_parent_ids, "domain_id": domain_id, "branch": branch},
+                )
+                parents_by_id: dict[str, dict] = {}
+                for r in await parent_result.data():
+                    props = r.get("props") or {}
+                    if props.get("id"):
+                        parents_by_id[props["id"]] = {"props": props, "labels": r.get("labels") or []}
+
+                for parent_id in new_parent_ids:  # literal primeiro, depois score
+                    if len(body_snippets) >= body_quota:
+                        break
+                    parent = parents_by_id.get(parent_id)
+                    if parent is None:
+                        continue
+                    if pillar and parent["props"].get("pillar", "") != pillar:
+                        if not any(lbl == pillar for lbl in parent["labels"]):
+                            continue
+                    hit = best_chunk[parent_id]
+                    all_seed_ids.append(parent_id)
+                    seed_props[parent_id] = parent
+                    body_snippets[parent_id] = _build_match_snippet(
+                        str(hit.get("content") or ""), str(hit.get("source_file") or ""), keyword_list
+                    )
+        except Exception as e:
+            # Índice ausente (ainda não criado) ou query inválida: a busca por título segue valendo.
+            logger.warning("Busca no corpo (%s) indisponível: %s", _CHUNK_FTS_INDEX, e)
+
         if not all_seed_ids:
             return SubgraphResponse(
                 nodes=[],
@@ -297,7 +441,14 @@ async def _run_query_context(
                 node_labels = list(n.labels) if hasattr(n, "labels") else []
                 if n["id"] in seed_props:
                     node_labels = seed_props[n["id"]]["labels"]
-                nodes.append(_neo4j_node_to_context(dict(n), node_labels))
+                ctx = _neo4j_node_to_context(dict(n), node_labels)
+                snippet = body_snippets.get(n["id"])
+                if snippet:
+                    # O MCP publicado só exibe id/title/summary/...: o trecho viaja no summary da RESPOSTA
+                    # (nada é gravado no grafo) e também em match_snippet.
+                    ctx.match_snippet = snippet
+                    ctx.summary = f"{ctx.summary}\n> 🔎 {snippet}" if ctx.summary else f"> 🔎 {snippet}"
+                nodes.append(ctx)
 
         seen_edges: set[tuple[str, str, str]] = set()
         for e in row.get("edges", []):
@@ -325,6 +476,7 @@ async def _run_query_context(
         query_meta={
             "keywords": keyword_list,
             "seed_count": len(all_seed_ids),
+            "body_seed_count": len(body_snippets),
             "pillar_filter": pillar,
             "dimension_filter": dimension,
             "domain_id": domain_id,
