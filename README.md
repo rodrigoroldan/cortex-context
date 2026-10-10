@@ -252,6 +252,17 @@ file of its spec, not a spec of its own.
   `README.md` > `plan.md` (folder root) > first in alphabetical order.
 - The node also carries `files`, `files_str`, `source_folder` and `has_folder: true`. Files larger than
   1 MB are skipped.
+- **Repeated numbers**: several folders may share a number (`217-alpha-draft`, `217-gamma-register`).
+  Among *all* folders on disk with the same number, in alphabetical order, the first keeps `spec-217` and
+  the others become `spec-217-<rest of the folder name>`; chunks and cross-references of a renamed folder use
+  its new id, references to `spec-217` go to the owner, and the GitHub issue `#217` enriches `spec-217`. The
+  rule only looks at folder names, so full and incremental runs agree: touching one folder re-processes the
+  sibling folders with the same number. If the owner folder is removed, the next folder is promoted to
+  `spec-217` and the old `spec-217-<slug>` node is deleted (incremental) or pruned (full). A folder whose
+  `frontmatter.id` differs from `spec-NNN` keeps it (and does not free `spec-NNN` for the next folder); two
+  folders with the same explicit id collide — the second one is skipped and reported in
+  `details.id_collisions`. Re-identified folders are listed in `details.duplicate_folders` as
+  `{"folder": …, "id": …}` (a warning, not an error).
 - Every file is split into `DocumentChunk` nodes (`spec-NNN__<file-slug>__chunk_<i>`, with
   `source_file` and `chunk_source: "folder"`) — **always**, with or without an embedder. They feed the
   `doc_chunk_fts` full-text index; embeddings stay optional and computed in the background.
