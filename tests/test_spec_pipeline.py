@@ -21,6 +21,7 @@ from app.core.dimension_loader import load_dimensions
 from app.core.parsers.base import EdgeData, NodeData
 from app.core.spec_folders import parse_spec_folder
 from app.core.spec_issues import SpecIssue, map_issue
+from app.ingestor.relationship_builder import rebuild_spec_affects
 from app.ingestor.spec_pipeline import SpecGraphStore, SpecIngestRequest, run_spec_ingest
 from app.main import create_app
 from tests.spec_store_fake import LONG_AGO, InMemorySpecStore
@@ -691,6 +692,108 @@ class TestIssues:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# AFFECTS (Spec -> Service) recalculadas no fim da ingestão
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _store_with_service() -> InMemorySpecStore:
+    store = InMemorySpecStore()
+    store.seed_service("service-backend", "acme-backend")  # spec 861 declara repos: [acme-backend]
+    return store
+
+
+class TestSpecAffects:
+    @pytest.mark.asyncio
+    async def test_completa_recalcula_as_affects_de_todas_as_specs(self, specs_root):
+        store = _store_with_service()
+
+        result = await _run(store, specs_root)
+
+        assert store.affects == {("spec-861", "service-backend"): True}
+        assert store.calls[-1] == ("rebuild_affects", None)  # None = todas, e é a última etapa
+        assert result.details["affects_edges"] == 1
+        assert result.edges_upserted >= 1
+
+    @pytest.mark.asyncio
+    async def test_incremental_recalcula_so_as_specs_tocadas(self, specs_root):
+        store = _store_with_service()
+        await _run(store, specs_root)
+        store.affects[("spec-862", "service-backend")] = True  # de outra spec: não pode ser tocada
+        store.calls.clear()
+
+        result = await _run(store, specs_root, request=SpecIngestRequest(spec_paths=["specs/861-split-bill/RUNBOOK.md"]))
+
+        assert ("rebuild_affects", ["spec-861"]) in store.calls
+        assert ("spec-862", "service-backend") in store.affects
+        assert result.details["affects_edges"] == 1
+
+    @pytest.mark.asyncio
+    async def test_repos_removido_do_frontmatter_nao_deixa_aresta_velha(self, specs_root):
+        store = _store_with_service()
+        await _run(store, specs_root)
+        assert ("spec-861", "service-backend") in store.affects
+        spec_md = specs_root / "861-split-bill" / "spec.md"
+        spec_md.write_text(spec_md.read_text().replace("repos: [acme-backend]\n", ""), encoding="utf-8")
+
+        result = await _run(store, specs_root, request=SpecIngestRequest(spec_paths=["861-split-bill/spec.md"]))
+
+        assert "repos" not in store.nodes["spec-861"]  # o upsert não deixa o repos velho no nó
+        assert ("spec-861", "service-backend") not in store.affects
+        assert result.details["affects_edges"] == 0
+
+    @pytest.mark.asyncio
+    async def test_aresta_affects_manual_sem_created_at_e_preservada(self, specs_root):
+        store = _store_with_service()
+        store.affects[("spec-861", "service-feito-a-mao")] = False  # manifest/manual: sem created_at
+
+        await _run(store, specs_root)
+
+        assert store.affects[("spec-861", "service-feito-a-mao")] is False
+        assert ("spec-861", "service-backend") in store.affects
+
+    @pytest.mark.asyncio
+    async def test_pasta_removida_com_issue_recalcula_a_spec_rebaixada(self, specs_root):
+        store = _store_with_service()
+        await _run(store, specs_root)
+        store.nodes["spec-861"].update(has_issue=True, issue_number=861)
+        shutil.rmtree(specs_root / "861-split-bill")
+
+        await _run(store, specs_root, request=SpecIngestRequest(spec_paths=["861-split-bill/spec.md"]))
+
+        assert "repos" not in store.nodes["spec-861"]  # repos saiu junto com a pasta
+        assert ("rebuild_affects", ["spec-861"]) in store.calls
+        assert ("spec-861", "service-backend") not in store.affects
+
+    @pytest.mark.asyncio
+    async def test_no_apagado_leva_as_affects_junto(self, specs_root):
+        store = _store_with_service()
+        await _run(store, specs_root)
+        shutil.rmtree(specs_root / "861-split-bill")
+
+        await _run(store, specs_root, request=SpecIngestRequest(spec_paths=["861-split-bill/spec.md"]))
+
+        assert "spec-861" not in store.nodes and store.affects == {}
+
+    @pytest.mark.asyncio
+    async def test_sem_nada_tocado_nao_recalcula(self, specs_root):
+        store = _store_with_service()
+
+        await _run(store, specs_root, request=SpecIngestRequest(spec_paths=["docs/guia.md"]))
+        github = GithubStub([_issue(950, "Spec 950 — X")])
+        await _run(store, specs_root, cfg=ISSUES_CFG, github=github, request=SpecIngestRequest(issue_numbers=[950]))
+
+        assert "rebuild_affects" not in store.call_names()
+
+    @pytest.mark.asyncio
+    async def test_sem_diretorio_fonte_a_completa_nao_recalcula(self, tmp_path):
+        store = _store_with_service()
+
+        await _run(store, tmp_path / "nao-montado")
+
+        assert "rebuild_affects" not in store.call_names()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Contrato do corpo da requisição
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -879,6 +982,15 @@ class TestSpecGraphStoreCypher:
         ]
 
     @pytest.mark.asyncio
+    async def test_rebaixar_no_a_so_issue_remove_tambem_o_repos(self):
+        driver, session = _recording_driver()
+
+        await SpecGraphStore(driver).strip_folder_data(["spec-1"])
+
+        cypher = session.run.call_args.args[0]
+        assert "n.has_folder" in cypher and "n.repos" in cypher and "n.repos_str" in cypher
+
+    @pytest.mark.asyncio
     async def test_listas_grandes_sao_divididas_em_lotes(self):
         driver, session = _recording_driver()
 
@@ -886,6 +998,70 @@ class TestSpecGraphStoreCypher:
 
         sizes = [len(c.args[1]["ids"]) for c in session.run.call_args_list]
         assert sizes == [500, 500, 200]
+
+
+class TestRebuildSpecAffects:
+    """Helper compartilhado por run_spec_ingest e ingest_all (app/ingestor/relationship_builder.py)."""
+
+    @pytest.mark.asyncio
+    async def test_remove_as_velhas_antes_de_criar(self):
+        driver, session = _recording_driver(single={"deleted": 2, "created": 3})
+
+        created = await rebuild_spec_affects(driver, "acme")
+
+        queries = [c.args[0] for c in session.run.call_args_list]
+        assert created == 3
+        assert len(queries) == 2
+        assert "DELETE r" in queries[0] and "[r:AFFECTS]->(:Service)" in queries[0]
+        assert "MERGE (spec)-[r:AFFECTS]->(svc)" in queries[1]
+        for call in session.run.call_args_list:
+            assert call.args[1] == {"domain_id": "acme", "spec_ids": None}  # None = todas as specs
+            assert "domain_id: $domain_id" in call.args[0]
+
+    @pytest.mark.asyncio
+    async def test_so_remove_as_que_o_mecanismo_criou(self):
+        """Toda AFFECTS criada aqui nasce com created_at; as de /ingest/manifest ou manuais não têm."""
+        driver, session = _recording_driver(single={"deleted": 0, "created": 0})
+
+        await rebuild_spec_affects(driver, "default")
+
+        delete_cypher, create_cypher = (c.args[0] for c in session.run.call_args_list)
+        assert "r.created_at IS NOT NULL" in delete_cypher
+        assert "ON CREATE SET r.created_at = datetime()" in create_cypher
+
+    @pytest.mark.asyncio
+    async def test_restringe_as_specs_pedidas(self):
+        driver, session = _recording_driver(single={"deleted": 0, "created": 1})
+
+        await rebuild_spec_affects(driver, "default", ["spec-861"])
+
+        for call in session.run.call_args_list:
+            assert call.args[1]["spec_ids"] == ["spec-861"]
+            assert "$spec_ids IS NULL OR spec.id IN $spec_ids" in call.args[0]
+
+    @pytest.mark.asyncio
+    async def test_replace_false_so_cria(self):
+        driver, session = _recording_driver(single={"created": 1})
+
+        await rebuild_spec_affects(driver, "default", replace=False)
+
+        assert session.run.call_count == 1 and "MERGE" in session.run.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_sem_registro_conta_zero(self):
+        driver, session = _recording_driver()
+        session.run.return_value.single = AsyncMock(return_value=None)
+
+        assert await rebuild_spec_affects(driver, "default") == 0
+
+    @pytest.mark.asyncio
+    async def test_store_delega_ao_helper_no_dominio_do_store(self):
+        with patch("app.ingestor.spec_pipeline.rebuild_spec_affects", new=AsyncMock(return_value=4)) as helper:
+            driver = MagicMock()
+            n = await SpecGraphStore(driver, "acme").rebuild_affects(["spec-1"])
+
+        assert n == 4
+        helper.assert_awaited_once_with(driver, "acme", ["spec-1"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -978,6 +1154,35 @@ class TestIngestRoute:
         spec_result = next(r for r in res.json()["results"] if r["dim_key"] == "spec")
         assert spec_result["details"]["mode"] == "full"
         assert set(store.nodes) == {"spec-861", "spec-862"}
+
+    def test_ingest_all_recalcula_as_affects_pelo_mesmo_helper(self, route_env):
+        client, _ = route_env
+
+        with patch("app.routes.ingest.rebuild_spec_affects", new=AsyncMock(return_value=7)) as helper:
+            res = client.post("/api/v1/ingest", headers={"X-Domain-ID": "acme"})
+
+        assert res.status_code == 200
+        helper.assert_awaited_once()
+        assert helper.await_args.args[1] == "acme" and len(helper.await_args.args) == 2  # todas as specs do domínio
+        spec_edges = next(r for r in res.json()["results"] if r["dim_key"] == "spec")["edges_upserted"]
+        assert res.json()["total_edges"] == spec_edges + 7
+
+    def test_ingest_all_nao_cai_se_o_recalculo_das_affects_falhar(self, route_env):
+        client, _ = route_env
+
+        with patch("app.routes.ingest.rebuild_spec_affects", new=AsyncMock(side_effect=RuntimeError("neo4j fora"))):
+            res = client.post("/api/v1/ingest")
+
+        assert res.status_code == 200
+
+    def test_resposta_da_spec_traz_affects_edges(self, route_env):
+        client, store = route_env
+        store.seed_service("service-backend", "acme-backend")
+
+        res = client.post("/api/v1/ingest/spec")
+
+        assert res.json()["details"]["affects_edges"] == 1
+        assert store.affects == {("spec-861", "service-backend"): True}
 
     def test_dimensao_sem_group_by_ignora_o_corpo(self, tmp_path):
         """O corpo só vale para spec = pasta; outras dimensões seguem o pipeline por arquivo."""

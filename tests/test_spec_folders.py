@@ -228,6 +228,14 @@ class TestParseSpecFolder:
         assert parsed.node.properties["title"] == "Outra spec"
         assert parsed.node.properties["files"] == ["plan.md"]
 
+    def test_sem_repos_no_primario_limpa_repos_velhos_do_no(self, tmp_path):
+        """O upsert é `SET n += props`; None (null no Cypher) remove o repos que o frontmatter deixou de ter."""
+        root = _make_specs(tmp_path)
+        folder = discover_spec_folders(root, ["**/*.md"])["862-outra"]  # plan.md sem repos
+        props = parse_spec_folder(folder, _spec_dim(str(root))).node.properties
+        assert "repos" in props and props["repos"] is None
+        assert "repos_str" in props and props["repos_str"] is None
+
     def test_frontmatter_id_do_primario_vence(self, tmp_path):
         root = tmp_path / "specs"
         _write(root, "861-x/spec.md", "---\nid: spec-split\ntitle: Split\n---\n# Split\n\nTexto.")

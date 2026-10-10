@@ -244,6 +244,10 @@ def parse_spec_folder(
             "has_folder": True,
         }
     )
+    # O upsert faz `SET n += props` (não substitui): sem isto, um `repos` removido do frontmatter ficaria
+    # no nó e alimentaria AFFECTS velhas. None remove a propriedade no Neo4j.
+    for key in ("repos", "repos_str"):
+        node.properties.setdefault(key, None)
 
     # Chunks: um conjunto por arquivo, ids únicos mesmo com arquivos de mesmo slug.
     chunks: list[NodeData] = []

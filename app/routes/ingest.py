@@ -27,6 +27,7 @@ from app.core.parser_registry import get_parser
 from app.core.parsers.manifest import IngestManifest, ManifestIngestResponse
 from app.core.spec_folders import GROUP_BY_NUMBERED_FOLDER
 from app.db.neo4j import apply_index, get_driver
+from app.ingestor.relationship_builder import rebuild_spec_affects
 from app.ingestor.spec_pipeline import SpecGraphStore, SpecIngestRequest, run_spec_ingest
 from app.routes.dependencies import get_domain_id
 
@@ -613,25 +614,11 @@ async def ingest_all(
                 message=f"Erro: {e}",
             ))
 
-    # Pós-processamento: AFFECTS edges (Spec → Service) via Cypher (filtrado por domain_id)
+    # Pós-processamento: AFFECTS edges (Spec → Service), filtrado por domain_id. Os Services podem ter sido
+    # ingeridos depois das specs nesta mesma execução, então o recálculo completo roda aqui também.
     affects_created = 0
     try:
-        driver = get_driver()
-        async with driver.session() as session:
-            result_affects = await session.run(
-                """
-                MATCH (spec:Spec {domain_id: $domain_id}) WHERE spec.repos IS NOT NULL AND size(spec.repos) > 0
-                UNWIND spec.repos AS repo
-                MATCH (svc:Service {domain_id: $domain_id}) WHERE svc.repo = repo
-                MERGE (spec)-[r:AFFECTS]->(svc)
-                ON CREATE SET r.created_at = datetime(), r.domain_id = $domain_id
-                RETURN count(r) AS created
-                """,
-                domain_id=domain_id,
-            )
-            record = await result_affects.single()
-            affects_created = record["created"] if record else 0
-            logger.info("AFFECTS edges (Spec→Service, domain: %s): %d criadas/verificadas", domain_id, affects_created)
+        affects_created = await rebuild_spec_affects(get_driver(), domain_id)
     except Exception as e:
         logger.error("Erro ao criar AFFECTS edges: %s", e)
 

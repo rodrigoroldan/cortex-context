@@ -21,6 +21,9 @@ Dois modos, escolhidos pelo corpo de `POST /api/v1/ingest/spec`:
 Ordem: remoções de pasta -> issues -> pastas (-> poda, no completo). A regra "pasta manda" é aplicada
 na própria escrita da issue (ver SpecGraphStore.upsert_issue_nodes), então não depende da ordem.
 
+No fim, as arestas AFFECTS (Spec -> Service) são recalculadas a partir de `repos`: de todas as specs na
+completa, só das tocadas na incremental (as AFFECTS velhas dessas specs saem antes).
+
 Salvaguardas contra apagar o grafo por engano: sem diretório fonte (ex: volume não montado) ou sem
 nenhuma pasta encontrada, nenhuma remoção/poda acontece; falha do GitHub nunca poda dados de issue;
 pasta que falhou no parse não é podada.
@@ -59,6 +62,7 @@ from app.core.spec_issues import (
     load_spec_issues_config,
     map_issue,
 )
+from app.ingestor.relationship_builder import rebuild_spec_affects
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +205,7 @@ RETURN DISTINCT n.source_folder AS folder
 _STRIP_FOLDER = """
 MATCH (n:Spec {domain_id: $domain_id})
 WHERE n.id IN $ids
-REMOVE n.has_folder, n.files, n.files_str, n.source_folder, n.primary_file, n.file_path
+REMOVE n.has_folder, n.files, n.files_str, n.source_folder, n.primary_file, n.file_path, n.repos, n.repos_str
 RETURN count(n) AS affected
 """
 
@@ -347,6 +351,10 @@ class SpecGraphStore:
     async def purge_legacy_chunks(self) -> int:
         return await self._count(_PURGE_LEGACY_CHUNKS)
 
+    async def rebuild_affects(self, spec_ids: list[str] | None = None) -> int:
+        """Recalcula as AFFECTS (Spec -> Service) das specs dadas (None = todas), removendo as velhas antes."""
+        return await rebuild_spec_affects(self.driver, self.domain_id, spec_ids)
+
     # -- consulta ------------------------------------------------------------
 
     async def list_folder_names(self) -> set[str]:
@@ -411,18 +419,19 @@ async def _drop_issue_data(store: SpecGraphStore, rows: list[dict]) -> int:
 
 async def _release_folders(
     store: SpecGraphStore, names: list[str], *, delete_orphans: bool, stats: _Stats
-) -> list[int]:
+) -> tuple[list[int], list[str]]:
     """
     Trata pastas que não existem mais no disco.
 
     Os chunks de folder dos nós afetados são sempre apagados. Nós sem dados de issue são apagados quando
     `delete_orphans` (incremental; no completo ficam para a poda). Nós com issue perdem só os dados de
-    pasta (viram "só-issue"); devolve os números dessas issues, para o chamador re-sincronizá-las
-    (o título/summary/status voltam a ser os da issue).
+    pasta (viram "só-issue"); devolve (números dessas issues, ids desses nós): o chamador re-sincroniza as
+    issues (o título/summary/status voltam a ser os da issue) e recalcula as AFFECTS (o `repos` saiu junto
+    com a pasta).
     """
     nodes = await store.find_nodes_by_folder(names)
     if not nodes:
-        return []
+        return [], []
     with_issue = [n for n in nodes if n.get("has_issue")]
     without_issue = [n for n in nodes if not n.get("has_issue")]
 
@@ -434,7 +443,8 @@ async def _release_folders(
         await store.strip_folder_data([n["id"] for n in with_issue])
 
     stats.folders_deleted += len(names) if delete_orphans else len(with_issue)
-    return [int(n["issue_number"]) for n in with_issue if n.get("issue_number") is not None]
+    numbers = [int(n["issue_number"]) for n in with_issue if n.get("issue_number") is not None]
+    return numbers, [n["id"] for n in with_issue]
 
 
 async def _apply_issues(
@@ -526,15 +536,20 @@ async def run_spec_ingest(
 
     # ── 1. Pastas removidas do disco ──────────────────────────────────────────
     demoted_issue_numbers: list[int] = []
+    demoted_ids: list[str] = []
     if incremental and removed_names:
         if trusted:
-            demoted_issue_numbers = await _release_folders(store, removed_names, delete_orphans=True, stats=stats)
+            demoted_issue_numbers, demoted_ids = await _release_folders(
+                store, removed_names, delete_orphans=True, stats=stats
+            )
         else:
             stats.warnings.append(f"pastas ausentes não removidas do grafo: {', '.join(removed_names)}")
     elif not incremental and trusted:
         vanished = sorted(await store.list_folder_names() - set(folders))
         if vanished:
-            demoted_issue_numbers = await _release_folders(store, vanished, delete_orphans=False, stats=stats)
+            demoted_issue_numbers, demoted_ids = await _release_folders(
+                store, vanished, delete_orphans=False, stats=stats
+            )
 
     # ── 2. Issues do GitHub ───────────────────────────────────────────────────
     issues_ok = False
@@ -570,6 +585,7 @@ async def run_spec_ingest(
     failed_folders: list[str] = []
     all_edges: list[EdgeData] = []
     seen_ids: dict[str, str] = {}
+    touched_ids: list[str] = list(demoted_ids)  # specs cujo `repos` pode ter mudado (para recalcular AFFECTS)
 
     for batch_names in _batches(target_names, FOLDER_BATCH):
         parsed: list[SpecFolderParse] = []
@@ -610,6 +626,7 @@ async def run_spec_ingest(
             failed_folders.extend(p.node.properties["source_folder"] for p in parsed)
             continue
         stats.folders_parsed += len(parsed)
+        touched_ids.extend(p.node.node_id for p in parsed)
         all_edges.extend(e for p in parsed for e in p.edges)
         if is_embedder_enabled():
             embedding_chunks.extend(chunks)
@@ -635,6 +652,14 @@ async def run_spec_ingest(
                 await store.purge_stale_chunks("folder", started_at)
                 await store.purge_legacy_chunks()
 
+    # ── 5. AFFECTS (Spec -> Service) ──────────────────────────────────────────
+    # Completa: todas as specs. Incremental: só as tocadas (pastas regravadas e nós rebaixados a só-issue).
+    # As AFFECTS velhas dessas specs saem antes, para que um `repos` removido não deixe aresta para trás.
+    affects_edges = 0
+    if (not incremental and trusted) or (incremental and touched_ids):
+        affects_edges = await store.rebuild_affects(None if not incremental else list(dict.fromkeys(touched_ids)))
+        stats.edges_upserted += affects_edges
+
     details: dict[str, Any] = {
         "mode": "incremental" if incremental else "full",
         "folders_parsed": stats.folders_parsed,
@@ -646,6 +671,7 @@ async def run_spec_ingest(
         "issues_enabled": issues_cfg is not None,
         "ignored_paths": stats.ignored_paths,
         "pruned_nodes": stats.pruned_nodes,
+        "affects_edges": affects_edges,
         "files_parsed": stats.files_parsed,
         "files_failed": stats.files_failed,
     }

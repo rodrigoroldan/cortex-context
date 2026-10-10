@@ -14,7 +14,7 @@ from app.core.parsers.base import EdgeData, NodeData
 from app.core.spec_issues import MappedIssue
 
 _ISSUE_KEYS = ("has_issue", "issue_number", "issue_url", "issue_state", "issue_state_reason", "issue_updated_at")
-_FOLDER_KEYS = ("has_folder", "files", "files_str", "source_folder", "primary_file", "file_path")
+_FOLDER_KEYS = ("has_folder", "files", "files_str", "source_folder", "primary_file", "file_path", "repos", "repos_str")
 LONG_AGO = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 
@@ -29,6 +29,8 @@ class InMemorySpecStore:
         self.chunks: dict[str, dict] = {}
         self.edges: list[EdgeData] = []
         self.calls: list[tuple] = []
+        self.services: dict[str, str] = {}  # Service.repo -> id do Service
+        self.affects: dict[tuple[str, str], bool] = {}  # (spec, service) -> criada por rebuild_affects (tem created_at)
 
     @staticmethod
     def _now() -> datetime:
@@ -40,6 +42,9 @@ class InMemorySpecStore:
     def seed_node(self, node_id: str, *, ingested_at: datetime = LONG_AGO, **props) -> dict:
         self.nodes[node_id] = {"id": node_id, "ingested_at": ingested_at, **props}
         return self.nodes[node_id]
+
+    def seed_service(self, service_id: str, repo: str) -> None:
+        self.services[repo] = service_id
 
     def seed_chunk(self, chunk_id: str, parent_id: str, *, ingested_at: datetime = LONG_AGO, **props) -> dict:
         self.chunks[chunk_id] = {"id": chunk_id, "parent_id": parent_id, "ingested_at": ingested_at, **props}
@@ -56,8 +61,13 @@ class InMemorySpecStore:
     async def upsert_spec_nodes(self, nodes: list[NodeData]) -> int:
         self.calls.append(("upsert_spec_nodes", [n.node_id for n in nodes]))
         for n in nodes:
-            self.nodes.setdefault(n.node_id, {"id": n.node_id}).update(n.properties)
-            self.nodes[n.node_id]["ingested_at"] = self._now()
+            node = self.nodes.setdefault(n.node_id, {"id": n.node_id})
+            for k, v in n.properties.items():
+                if v is None:  # `SET n += {k: null}` remove a propriedade no Neo4j
+                    node.pop(k, None)
+                else:
+                    node[k] = v
+            node["ingested_at"] = self._now()
         return len(nodes)
 
     async def upsert_edges(self, edges: list[EdgeData]) -> int:
@@ -116,6 +126,8 @@ class InMemorySpecStore:
         removed = [i for i in ids if i in self.nodes]
         for i in removed:
             del self.nodes[i]
+        for key in [k for k in self.affects if k[0] in ids]:  # DETACH DELETE leva as arestas
+            del self.affects[key]
         return len(removed)
 
     async def strip_folder_data(self, ids: list[str]) -> int:
@@ -149,6 +161,20 @@ class InMemorySpecStore:
         for cid in doomed:
             del self.chunks[cid]
         return len(doomed)
+
+    async def rebuild_affects(self, spec_ids: list[str] | None = None) -> int:
+        self.calls.append(("rebuild_affects", None if spec_ids is None else list(spec_ids)))
+        for key in [k for k, ours in self.affects.items() if ours and (spec_ids is None or k[0] in spec_ids)]:
+            del self.affects[key]  # só as que o mecanismo criou; as manuais ficam
+        created = 0
+        for node in self.nodes.values():
+            if spec_ids is not None and node["id"] not in spec_ids:
+                continue
+            for repo in node.get("repos") or []:
+                if repo in self.services:
+                    self.affects.setdefault((node["id"], self.services[repo]), True)
+                    created += 1
+        return created
 
     # -- consulta ------------------------------------------------------------
 
