@@ -66,6 +66,15 @@ ingest:
     - "**/__pycache__/**"
     - "**/.next/**"
 
+# ─── Specs vindas de issues do GitHub (opcional) ─────────────────────────────
+# Issues com o label abaixo viram (ou enriquecem) nós Spec: título "Spec NNN — <título>"
+# (sem NNN, usa o número da issue), issue_* no nó e o corpo em chunks pesquisáveis.
+# Se a spec também tem pasta no filesystem, a pasta manda em title/summary/status.
+# Usa GITHUB_TOKEN (.env) para repos privados. `repo` vazio = recurso desligado.
+spec_issues:
+  repo: "" # Ex: "myorg/specs-repo"
+  label: "spec"
+
 # ─── Fonte GitHub API ────────────────────────────────────────────────────────
 # Configurações para parsers que buscam arquivos via GitHub API.
 # Requer GITHUB_TOKEN no .env para repos privados.
