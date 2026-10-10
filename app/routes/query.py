@@ -124,6 +124,16 @@ _SNIPPET_CHARS = 240
 _LUCENE_NOISE = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
 
 
+def _literal_keywords(keyword_list: list[str]) -> list[str]:
+    """Keywords como o usuário digitou (minúsculas, sem aspas em volta), para casar por substring."""
+    literals: list[str] = []
+    for kw in keyword_list:
+        lit = kw.strip().strip('"').strip().lower()
+        if lit and lit not in literals:
+            literals.append(lit)
+    return literals
+
+
 def _snippet_terms(keyword_list: list[str]) -> list[str]:
     """Termos para localizar no texto: cada keyword inteira e suas palavras (a busca fulltext casa por token)."""
     terms: list[str] = []
@@ -135,19 +145,30 @@ def _snippet_terms(keyword_list: list[str]) -> list[str]:
     return terms
 
 
-def _build_match_snippet(content: str, source_file: str, keyword_list: list[str], width: int = _SNIPPET_CHARS) -> str:
-    """
-    "<source_file>: …<trecho>…" — ~`width` caracteres em volta da primeira ocorrência de uma keyword
-    (a que aparece mais cedo no texto). Sem ocorrência literal (a busca fulltext pode casar por
-    tokenização), usa o início do texto.
-    """
-    text = re.sub(r"\s+", " ", content or "").strip()
-    lowered = text.lower()  # lower() (e não casefold) para que os índices valham também em `text`
+def _first_position(lowered: str, terms: list[str]) -> int:
+    """Menor índice em que algum dos termos aparece em `lowered` (-1 se nenhum)."""
     first = -1
-    for term in _snippet_terms(keyword_list):
+    for term in terms:
         pos = lowered.find(term.lower())
         if pos != -1 and (first == -1 or pos < first):
             first = pos
+    return first
+
+
+def _build_match_snippet(content: str, source_file: str, keyword_list: list[str], width: int = _SNIPPET_CHARS) -> str:
+    """
+    "<source_file>: …<trecho>…" — ~`width` caracteres em volta da primeira ocorrência de uma keyword.
+
+    A ocorrência LITERAL da keyword (ex: "api-staging") tem prioridade: o analyzer do fulltext quebra
+    "https://api-staging.exemplo.dev" em tokens soltos, e ancorar o trecho em "api" mostraria um lugar
+    qualquer do texto. Sem literal, tenta as palavras da keyword (sem operadores Lucene) e, sem
+    ocorrência nenhuma, usa o início do texto.
+    """
+    text = re.sub(r"\s+", " ", content or "").strip()
+    lowered = text.lower()  # lower() (e não casefold) para que os índices valham também em `text`
+    first = _first_position(lowered, _literal_keywords(keyword_list))
+    if first == -1:
+        first = _first_position(lowered, _snippet_terms(keyword_list))
     start = max(first - width // 3, 0) if first != -1 else 0
     snippet = text[start : start + width].strip()
     prefix = f"{source_file}: " if source_file else ""
@@ -278,76 +299,88 @@ async def _run_query_context(
                 pass
 
         # ── Seed: corpo das specs (chunks) ─────────────────────────────────────
-        # Depois dos hits de título/summary: cada chunk achado vira seed do seu pai, sem repetir seeds
-        # já existentes e só até completar `limit`. Cada seed de corpo guarda o trecho que casou.
+        # Roda SEMPRE: os 3 índices de título costumam encher `limit` sozinhos, e o corpo não pode
+        # depender de sobra. Cada chunk achado vira seed do seu pai (se ainda não for seed), até
+        # max(2, limit // 3) pais de corpo ALÉM dos seeds de título — o total pode passar de `limit`.
+        # Cada seed de corpo guarda o trecho que casou.
         body_snippets: dict[str, str] = {}
-        remaining = limit - len(all_seed_ids)
-        if remaining > 0:
-            try:
-                chunk_result = await session.run(
-                    f"""
-                    CALL db.index.fulltext.queryNodes('{_CHUNK_FTS_INDEX}', $query)
-                    YIELD node, score
-                    WHERE (node.domain_id = $domain_id OR ($domain_id = 'default' AND node.domain_id IS NULL))
-                      AND (node.branch = $branch OR node.branch = 'main' OR node.branch IS NULL OR node.is_draft = false)
-                      AND node.parent_id IS NOT NULL
-                    RETURN node.parent_id AS parent_id,
-                           node.source_file AS source_file,
-                           node.content AS content,
-                           score
-                    ORDER BY score DESC
-                    LIMIT $chunk_limit
+        body_quota = max(2, limit // 3)
+        try:
+            chunk_result = await session.run(
+                f"""
+                CALL db.index.fulltext.queryNodes('{_CHUNK_FTS_INDEX}', $query)
+                YIELD node, score
+                WHERE (node.domain_id = $domain_id OR ($domain_id = 'default' AND node.domain_id IS NULL))
+                  AND (node.branch = $branch OR node.branch = 'main' OR node.branch IS NULL OR node.is_draft = false)
+                  AND node.parent_id IS NOT NULL
+                RETURN node.parent_id AS parent_id,
+                       node.source_file AS source_file,
+                       node.content AS content,
+                       score
+                ORDER BY score DESC
+                LIMIT $chunk_limit
+                """,
+                {
+                    "query": fts_query,
+                    "chunk_limit": max(limit * 10, 50),
+                    "domain_id": domain_id,
+                    "branch": branch,
+                },
+            )
+            chunk_hits = await chunk_result.data()
+
+            # O analyzer padrão quebra "https://api-staging.exemplo.dev/x" em "api" + "staging.exemplo.dev":
+            # uma busca por "api-staging" casa por "api" em centenas de chunks e o score sozinho não põe o
+            # que tem o texto literal na frente. Chunks com a keyword literal (substring, sem diferenciar
+            # maiúsculas) vêm primeiro; dentro de cada grupo vale a ordem de score (sort estável).
+            literals = _literal_keywords(keyword_list)
+            chunk_hits = sorted(
+                chunk_hits,
+                key=lambda h: 0 if any(lit in str(h.get("content") or "").lower() for lit in literals) else 1,
+            )
+
+            # pai -> melhor chunk (o primeiro da ordem acima)
+            best_chunk: dict[str, dict] = {}
+            for hit in chunk_hits:
+                parent_id = hit.get("parent_id")
+                if parent_id and parent_id not in best_chunk:
+                    best_chunk[parent_id] = hit
+            new_parent_ids = [pid for pid in best_chunk if pid not in seed_props]
+
+            if new_parent_ids:
+                parent_result = await session.run(
+                    """
+                    MATCH (p) WHERE p.id IN $parent_ids AND NOT p:DocumentChunk
+                      AND (p.domain_id = $domain_id OR ($domain_id = 'default' AND p.domain_id IS NULL))
+                      AND (p.branch = $branch OR p.branch = 'main' OR p.branch IS NULL OR p.is_draft = false)
+                    RETURN p {.*} AS props, labels(p) AS labels
                     """,
-                    {
-                        "query": fts_query,
-                        "chunk_limit": max(limit * 4, 20),
-                        "domain_id": domain_id,
-                        "branch": branch,
-                    },
+                    {"parent_ids": new_parent_ids, "domain_id": domain_id, "branch": branch},
                 )
-                chunk_hits = await chunk_result.data()
+                parents_by_id: dict[str, dict] = {}
+                for r in await parent_result.data():
+                    props = r.get("props") or {}
+                    if props.get("id"):
+                        parents_by_id[props["id"]] = {"props": props, "labels": r.get("labels") or []}
 
-                # pai -> melhor chunk (já vem em ordem de score)
-                best_chunk: dict[str, dict] = {}
-                for hit in chunk_hits:
-                    parent_id = hit.get("parent_id")
-                    if parent_id and parent_id not in best_chunk:
-                        best_chunk[parent_id] = hit
-                new_parent_ids = [pid for pid in best_chunk if pid not in seed_props]
-
-                if new_parent_ids:
-                    parent_result = await session.run(
-                        """
-                        MATCH (p) WHERE p.id IN $parent_ids AND NOT p:DocumentChunk
-                          AND (p.domain_id = $domain_id OR ($domain_id = 'default' AND p.domain_id IS NULL))
-                          AND (p.branch = $branch OR p.branch = 'main' OR p.branch IS NULL OR p.is_draft = false)
-                        RETURN p {.*} AS props, labels(p) AS labels
-                        """,
-                        {"parent_ids": new_parent_ids, "domain_id": domain_id, "branch": branch},
-                    )
-                    parents_by_id: dict[str, dict] = {}
-                    for r in await parent_result.data():
-                        props = r.get("props") or {}
-                        if props.get("id"):
-                            parents_by_id[props["id"]] = {"props": props, "labels": r.get("labels") or []}
-
-                    for parent_id in new_parent_ids:  # ordem de score
-                        parent = parents_by_id.get(parent_id)
-                        if parent is None or remaining <= 0:
+                for parent_id in new_parent_ids:  # literal primeiro, depois score
+                    if len(body_snippets) >= body_quota:
+                        break
+                    parent = parents_by_id.get(parent_id)
+                    if parent is None:
+                        continue
+                    if pillar and parent["props"].get("pillar", "") != pillar:
+                        if not any(lbl == pillar for lbl in parent["labels"]):
                             continue
-                        if pillar and parent["props"].get("pillar", "") != pillar:
-                            if not any(lbl == pillar for lbl in parent["labels"]):
-                                continue
-                        hit = best_chunk[parent_id]
-                        all_seed_ids.append(parent_id)
-                        seed_props[parent_id] = parent
-                        body_snippets[parent_id] = _build_match_snippet(
-                            str(hit.get("content") or ""), str(hit.get("source_file") or ""), keyword_list
-                        )
-                        remaining -= 1
-            except Exception as e:
-                # Índice ausente (ainda não criado) ou query inválida: a busca por título segue valendo.
-                logger.warning("Busca no corpo (%s) indisponível: %s", _CHUNK_FTS_INDEX, e)
+                    hit = best_chunk[parent_id]
+                    all_seed_ids.append(parent_id)
+                    seed_props[parent_id] = parent
+                    body_snippets[parent_id] = _build_match_snippet(
+                        str(hit.get("content") or ""), str(hit.get("source_file") or ""), keyword_list
+                    )
+        except Exception as e:
+            # Índice ausente (ainda não criado) ou query inválida: a busca por título segue valendo.
+            logger.warning("Busca no corpo (%s) indisponível: %s", _CHUNK_FTS_INDEX, e)
 
         if not all_seed_ids:
             return SubgraphResponse(
